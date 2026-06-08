@@ -1,0 +1,780 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Menu, X, Plus, MessageSquare, CheckCircle2, Circle, 
+  Trash2, Send, Bot, User, ListTodo, Edit2, ChevronRight, 
+  Calendar, Flag, AlignLeft, ArrowRight, LayoutDashboard, CalendarDays, ChevronLeft
+} from 'lucide-react';
+
+const apiKey = ""; // The execution environment provides the key at runtime.
+
+// --- Helper: Generate Unique ID ---
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
+// --- API Helper: Call Gemini ---
+const callGemini = async (prompt, systemInstruction, retries = 5) => {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    systemInstruction: { parts: [{ text: systemInstruction }] }
+  };
+
+  const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      
+      const data = await response.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text || "AI 无法响应，请重试。";
+    } catch (error) {
+      if (i === retries - 1) return "抱歉，网络连接或服务出现问题，请稍后再试。";
+      await delay(Math.pow(2, i) * 1000);
+    }
+  }
+};
+
+export default function App() {
+  // --- State ---
+  const [plans, setPlans] = useState([
+    {
+      id: 'default-1',
+      title: '欢迎使用 AI Todo',
+      todos: [
+        { id: generateId(), text: '在左侧创建一个新的 Plan', completed: false, notes: '', dueDate: '', priority: 'none' },
+        { id: generateId(), text: '点击这个任务查看详情并进行编辑', completed: false, notes: '像 Microsoft To Do 一样，你可以在这里添加更详细的描述。', dueDate: '2026-06-10', priority: 'high' },
+        { id: generateId(), text: '在聊天框告诉 AI 你的目标', completed: false, notes: '', dueDate: '', priority: 'none' },
+      ],
+      chat: [
+        { role: 'ai', text: '你好！我是你的 AI 任务助手。我们可以一起制定计划。想要开始什么新项目吗？' }
+      ]
+    }
+  ]);
+  const [activePlanId, setActivePlanId] = useState('default-1');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  // Chat & UI State
+  const [inputMessage, setInputMessage] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [newTaskText, setNewTaskText] = useState('');
+  const [editingTitleId, setEditingTitleId] = useState(null);
+  const [editedTitle, setEditedTitle] = useState('');
+  
+  // Todo Details State
+  const [selectedTodoId, setSelectedTodoId] = useState(null);
+
+  // View State
+  const [currentView, setCurrentView] = useState('plans'); // 'plans' | 'calendar'
+  const [currentDate, setCurrentDate] = useState(new Date()); // For calendar month
+
+  const chatEndRef = useRef(null);
+
+  // --- Computed ---
+  const activePlan = plans.find(p => p.id === activePlanId) || plans[0];
+  const activeTodos = activePlan?.todos.filter(t => !t.completed) || [];
+  const completedTodos = activePlan?.todos.filter(t => t.completed) || [];
+  
+  const allTodos = plans.flatMap(p => p.todos.map(t => ({ ...t, planId: p.id, planTitle: p.title })));
+  const sortedAllTodos = [...allTodos].sort((a, b) => {
+    if (a.completed !== b.completed) return a.completed ? 1 : -1; // Uncompleted first
+    if (a.dueDate && b.dueDate) return new Date(a.dueDate) - new Date(b.dueDate);
+    if (a.dueDate) return -1;
+    if (b.dueDate) return 1;
+    return 0;
+  });
+
+  const selectedTodo = allTodos.find(t => t.id === selectedTodoId);
+
+  // --- Calendar Helpers ---
+  const formatYMD = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+  
+  const generateCalendarDays = () => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstDay = new Date(year, month, 1).getDay();
+    const days = [];
+    for (let i = 0; i < firstDay; i++) days.push(null);
+    for (let i = 1; i <= daysInMonth; i++) days.push(new Date(year, month, i));
+    return days;
+  };
+
+  // --- Effects ---
+  useEffect(() => {
+    if (!selectedTodoId) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [activePlan?.chat, isTyping, selectedTodoId]);
+
+  // Handle plan switch - clear selected todo
+  useEffect(() => {
+    setSelectedTodoId(null);
+  }, [activePlanId]);
+
+  // --- Handlers: Plans ---
+  const createPlan = () => {
+    const newPlan = {
+      id: generateId(),
+      title: '新建计划',
+      todos: [],
+      chat: [{ role: 'ai', text: '新计划已创建！告诉我你想做什么，我来帮你拆解任务。' }]
+    };
+    setPlans([newPlan, ...plans]);
+    setActivePlanId(newPlan.id);
+    setIsSidebarOpen(false);
+  };
+
+  const deletePlan = (id) => {
+    const newPlans = plans.filter(p => p.id !== id);
+    setPlans(newPlans);
+    if (activePlanId === id) {
+      setActivePlanId(newPlans.length > 0 ? newPlans[0].id : null);
+    }
+  };
+
+  const updatePlanTitle = (id, newTitle) => {
+    setPlans(plans.map(p => p.id === id ? { ...p, title: newTitle } : p));
+    setEditingTitleId(null);
+  };
+
+  // --- Handlers: Todos ---
+  const findPlanByTodoId = (id) => plans.find(p => p.todos.some(t => t.id === id));
+
+  const updateTodos = (planId, newTodos) => {
+    setPlans(plans.map(p => p.id === planId ? { ...p, todos: newTodos } : p));
+  };
+
+  const toggleTodo = (todoId, e) => {
+    if (e) e.stopPropagation();
+    const plan = findPlanByTodoId(todoId);
+    if(!plan) return;
+    const newTodos = plan.todos.map(t => 
+      t.id === todoId ? { ...t, completed: !t.completed } : t
+    );
+    updateTodos(plan.id, newTodos);
+  };
+
+  const deleteTodo = (todoId, e) => {
+    if (e) e.stopPropagation();
+    const plan = findPlanByTodoId(todoId);
+    if(!plan) return;
+    const newTodos = plan.todos.filter(t => t.id !== todoId);
+    updateTodos(plan.id, newTodos);
+    if (selectedTodoId === todoId) setSelectedTodoId(null);
+  };
+
+  const addTodoManual = (e) => {
+    if (e.key === 'Enter' && newTaskText.trim() !== '') {
+      const newTodos = [
+        ...activePlan.todos, 
+        { id: generateId(), text: newTaskText.trim(), completed: false, notes: '', dueDate: '', priority: 'none' }
+      ];
+      updateTodos(activePlan.id, newTodos);
+      setNewTaskText('');
+    }
+  };
+
+  // --- Handlers: Todo Details Update ---
+  const updateSelectedTodo = (updates) => {
+    if (!selectedTodoId) return;
+    const plan = findPlanByTodoId(selectedTodoId);
+    if(!plan) return;
+    const newTodos = plan.todos.map(t => 
+      t.id === selectedTodoId ? { ...t, ...updates } : t
+    );
+    updateTodos(plan.id, newTodos);
+  };
+
+  // --- Handlers: Chat & AI ---
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim() || !activePlan) return;
+
+    const userText = inputMessage.trim();
+    setInputMessage('');
+    
+    // Add user message to chat
+    const updatedChat = [...activePlan.chat, { role: 'user', text: userText }];
+    setPlans(plans.map(p => p.id === activePlan.id ? { ...p, chat: updatedChat } : p));
+    setIsTyping(true);
+
+    const systemInstruction = `
+      你是一个极简、高效的 AI 任务管理助手。
+      当前计划标题: "${activePlan.title}"
+      当前任务列表 (JSON): ${JSON.stringify(activePlan.todos)}
+      
+      用户会提出要求（例如添加任务、修改计划、安排行程等）。
+      你必须以严格的格式回复，包含两部分：
+      1. 简短友好的回复文本（用中文，告诉用户你做了什么改变）。
+      2. 在回复的最后，必须包含一个 JSON 代码块，里面是**完整且更新后的任务列表**。
+      
+      JSON 格式要求: 
+      - 必须用 \`\`\`json 和 \`\`\` 包裹。
+      - 是一个数组，每个元素是一个对象: { "id": "唯一字符串(保留原来的)", "text": "任务描述", "completed": boolean, "notes": "详细备注(可选)", "dueDate": "YYYY-MM-DD(可选)", "priority": "high|medium|low|none" }
+      - 请务必保留未被用户要求删除的现有任务！只在用户的要求下增加、修改或删除任务。
+    `;
+
+    const responseText = await callGemini(userText, systemInstruction);
+    
+    // Parse response
+    let finalAiText = responseText;
+    let newTodos = activePlan.todos;
+
+    const jsonRegex = /```(?:json)?\s*([\s\S]*?)```/;
+    const match = responseText.match(jsonRegex);
+    
+    if (match) {
+      try {
+        newTodos = JSON.parse(match[1]);
+        // Remove the JSON block from the chat message for clean UI
+        finalAiText = responseText.replace(jsonRegex, '').trim();
+      } catch (e) {
+        console.error("Failed to parse AI JSON", e);
+      }
+    }
+
+    // Update state with AI response and new todos
+    setPlans(prevPlans => prevPlans.map(p => {
+      if (p.id === activePlan.id) {
+        return {
+          ...p,
+          chat: [...p.chat, { role: 'ai', text: finalAiText || "任务已更新！" }],
+          todos: newTodos
+        };
+      }
+      return p;
+    }));
+    
+    setIsTyping(false);
+  };
+
+  const getPriorityColor = (priority) => {
+    switch (priority) {
+      case 'high': return 'text-red-500';
+      case 'medium': return 'text-yellow-500';
+      case 'low': return 'text-blue-500';
+      default: return 'text-gray-400';
+    }
+  };
+
+  if (!activePlanId && plans.length === 0) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-500">
+        <div className="text-center">
+          <ListTodo className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+          <p className="text-lg">没有计划，点击下方按钮创建一个。</p>
+          <button onClick={createPlan} className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+            新建计划
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen bg-white font-sans overflow-hidden">
+      
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/20 z-20 md:hidden transition-opacity"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* --- Sidebar --- */}
+      <aside className={`
+        fixed md:static inset-y-0 left-0 z-30 w-64 bg-gray-50 border-r border-gray-200 
+        transform transition-transform duration-300 ease-in-out flex flex-col
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        shrink-0
+      `}>
+        <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+          <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+            <CheckCircle2 className="w-6 h-6 text-indigo-600" />
+            AI Todo
+          </h1>
+          <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-1 text-gray-500 hover:bg-gray-200 rounded">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+          {/* Smart Views */}
+          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2 mt-2">
+            视图 (Views)
+          </div>
+          <div 
+            onClick={() => { setCurrentView('plans'); setIsSidebarOpen(false); }}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${currentView === 'plans' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'}`}
+          >
+            <LayoutDashboard className={`w-4 h-4 ${currentView === 'plans' ? 'text-indigo-600' : 'text-gray-400'}`} />
+            <span className="text-sm font-medium">任务计划</span>
+          </div>
+          <div 
+            onClick={() => { setCurrentView('calendar'); setIsSidebarOpen(false); }}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors mb-4 ${currentView === 'calendar' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'}`}
+          >
+            <CalendarDays className={`w-4 h-4 ${currentView === 'calendar' ? 'text-indigo-600' : 'text-gray-400'}`} />
+            <span className="text-sm font-medium">日历视图</span>
+          </div>
+
+          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2 mt-4">
+            我的计划 (Plans)
+          </div>
+          {plans.map(plan => (
+            <div 
+              key={plan.id}
+              onClick={() => { setActivePlanId(plan.id); setCurrentView('plans'); setIsSidebarOpen(false); }}
+              className={`
+                group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors
+                ${activePlanId === plan.id && currentView === 'plans' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'}
+              `}
+            >
+              <div className="flex items-center gap-3 truncate">
+                <ListTodo className={`w-4 h-4 ${activePlanId === plan.id ? 'text-indigo-600' : 'text-gray-400'}`} />
+                <span className="truncate text-sm font-medium">{plan.title}</span>
+              </div>
+              <button 
+                onClick={(e) => { e.stopPropagation(); deletePlan(plan.id); }}
+                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 rounded transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="p-4 border-t border-gray-200">
+          <button 
+            onClick={createPlan}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-indigo-600 transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" /> 新建 Plan
+          </button>
+        </div>
+      </aside>
+
+      {/* --- Main Content --- */}
+      <main className="flex-1 flex flex-col md:flex-row h-full overflow-hidden bg-white w-full relative">
+        
+        {/* Mobile Header */}
+        <div className="md:hidden p-4 border-b border-gray-200 flex items-center justify-between bg-white z-10 shadow-sm shrink-0">
+          <button onClick={() => setIsSidebarOpen(true)} className="p-1 -ml-1 text-gray-600">
+            <Menu className="w-6 h-6" />
+          </button>
+          <span className="font-semibold text-gray-800 truncate px-4">{currentView === 'calendar' ? '日历视图' : activePlan?.title}</span>
+          <div className="w-6" /> {/* Spacer */}
+        </div>
+
+        {currentView === 'calendar' ? (
+          <div className="flex-1 flex flex-col md:flex-row w-full h-full overflow-hidden relative">
+            {/* Calendar Left List */}
+            <section className="w-full md:w-[35%] lg:w-[30%] border-r border-gray-200 bg-[#FAFAFA] flex flex-col h-[40vh] md:h-full shrink-0 z-0">
+              <div className="p-4 md:p-6 pb-2 border-b border-gray-100 shrink-0">
+                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                  <ListTodo className="w-5 h-5 text-indigo-600" />
+                  所有任务
+                </h2>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                {sortedAllTodos.map(todo => (
+                  <div 
+                    key={todo.id} 
+                    onClick={() => setSelectedTodoId(todo.id)}
+                    className={`
+                      group flex items-start gap-3 p-3 rounded-xl shadow-sm border transition-all cursor-pointer
+                      ${selectedTodoId === todo.id ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-transparent hover:border-gray-200'}
+                      ${todo.completed ? 'opacity-60' : ''}
+                    `}
+                  >
+                    <button onClick={(e) => toggleTodo(todo.id, e)} className={`mt-0.5 flex-shrink-0 ${todo.completed ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}>
+                      {todo.completed ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm ${todo.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>{todo.text}</p>
+                      <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs">
+                        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded truncate max-w-[120px]">{todo.planTitle}</span>
+                        {todo.dueDate && (
+                          <span className="flex items-center gap-1 text-indigo-600 font-medium whitespace-nowrap">
+                            <Calendar className="w-3 h-3" /> {todo.dueDate}
+                          </span>
+                        )}
+                        {todo.priority && todo.priority !== 'none' && (
+                          <Flag className={`w-3 h-3 ${todo.priority === 'high' ? 'text-red-500' : todo.priority === 'medium' ? 'text-yellow-500' : 'text-blue-500'}`} />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {sortedAllTodos.length === 0 && (
+                   <div className="text-center py-10 text-gray-400 text-sm">暂无任务</div>
+                )}
+              </div>
+            </section>
+
+            {/* Calendar Grid */}
+            <section className="flex-1 bg-white flex flex-col h-full overflow-hidden z-0">
+              <div className="p-4 md:p-6 border-b border-gray-100 flex items-center justify-between shrink-0">
+                <h2 className="text-lg font-bold text-gray-800">
+                  {currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月
+                </h2>
+                <div className="flex gap-2">
+                  <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"><ChevronLeft className="w-5 h-5"/></button>
+                  <button onClick={() => setCurrentDate(new Date())} className="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50">今天</button>
+                  <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"><ChevronLeft className="w-5 h-5 rotate-180"/></button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50/50">
+                <div className="grid grid-cols-7 gap-px bg-gray-200 border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                  {['日', '一', '二', '三', '四', '五', '六'].map(day => (
+                    <div key={day} className="bg-gray-50/80 py-2 text-center text-xs font-semibold text-gray-500">{day}</div>
+                  ))}
+                  {generateCalendarDays().map((date, i) => {
+                    if (!date) return <div key={`empty-${i}`} className="bg-white min-h-[100px]" />;
+                    const dateStr = formatYMD(date);
+                    const dayTodos = allTodos.filter(t => t.dueDate === dateStr);
+                    const isToday = dateStr === formatYMD(new Date());
+
+                    return (
+                      <div key={dateStr} className={`bg-white min-h-[100px] p-2 flex flex-col transition-colors hover:bg-gray-50 group`}>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className={`text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-indigo-600 text-white' : 'text-gray-700'}`}>
+                            {date.getDate()}
+                          </span>
+                          {dayTodos.length > 0 && <span className="text-[10px] text-gray-400 font-medium hidden md:inline-block">{dayTodos.length} 项</span>}
+                        </div>
+                        <div className="flex-1 flex flex-col gap-1 overflow-y-auto max-h-[80px]">
+                          {dayTodos.map(todo => (
+                            <div 
+                              key={todo.id} 
+                              onClick={() => setSelectedTodoId(todo.id)}
+                              className={`text-xs p-1 rounded truncate cursor-pointer transition-colors
+                                ${todo.completed ? 'bg-gray-100 text-gray-400 line-through' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}
+                              `}
+                              title={todo.text}
+                            >
+                              {todo.text}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : activePlan ? (
+          <>
+            {/* --- Todo Area (Middle) --- */}
+            <section className="flex-1 md:flex-none md:w-[45%] flex flex-col bg-[#FAFAFA] overflow-y-auto border-r border-gray-200 transition-all duration-300 ease-in-out">
+              <div className="p-6 md:p-8 w-full mx-auto">
+                
+                {/* Editable Title */}
+                <div className="mb-8 group flex items-center gap-2">
+                  {editingTitleId === activePlan.id ? (
+                    <input
+                      type="text"
+                      autoFocus
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      onBlur={() => updatePlanTitle(activePlan.id, editedTitle || activePlan.title)}
+                      onKeyPress={(e) => e.key === 'Enter' && updatePlanTitle(activePlan.id, editedTitle || activePlan.title)}
+                      className="text-2xl font-bold bg-transparent border-b-2 border-indigo-500 focus:outline-none text-gray-800 w-full"
+                    />
+                  ) : (
+                    <>
+                      <h2 className="text-2xl font-bold text-gray-800">{activePlan.title}</h2>
+                      <button 
+                        onClick={() => { setEditingTitleId(activePlan.id); setEditedTitle(activePlan.title); }}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-indigo-600 transition"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Manual Add Input */}
+                <div className="mb-6 relative shadow-sm rounded-xl">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Plus className="h-5 w-5 text-indigo-500" />
+                  </div>
+                  <input
+                    type="text"
+                    value={newTaskText}
+                    onChange={(e) => setNewTaskText(e.target.value)}
+                    onKeyPress={addTodoManual}
+                    className="block w-full pl-11 pr-3 py-3.5 bg-white border border-gray-100 rounded-xl text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow shadow-sm text-gray-700"
+                    placeholder="添加任务，按回车保存..."
+                  />
+                </div>
+
+                {/* Active Todos */}
+                <div className="space-y-2 mb-8">
+                  {activeTodos.map(todo => (
+                    <div 
+                      key={todo.id} 
+                      onClick={() => setSelectedTodoId(todo.id)}
+                      className={`
+                        group flex items-center gap-3 p-3.5 rounded-xl shadow-sm border transition-all cursor-pointer
+                        ${selectedTodoId === todo.id ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-transparent hover:border-gray-200'}
+                      `}
+                    >
+                      <button onClick={(e) => toggleTodo(todo.id, e)} className="text-gray-300 hover:text-indigo-500 flex-shrink-0 transition-colors">
+                        <Circle className="w-5 h-5" />
+                      </button>
+                      <span className={`flex-1 text-sm truncate ${selectedTodoId === todo.id ? 'text-indigo-900 font-medium' : 'text-gray-700'}`}>
+                        {todo.text}
+                      </span>
+                      
+                      {/* Icons indicators */}
+                      <div className="flex items-center gap-2 opacity-60">
+                         {todo.priority && todo.priority !== 'none' && (
+                           <Flag className={`w-3.5 h-3.5 ${getPriorityColor(todo.priority)}`} />
+                         )}
+                         {todo.dueDate && (
+                           <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                         )}
+                         {todo.notes && (
+                           <AlignLeft className="w-3.5 h-3.5 text-gray-400" />
+                         )}
+                      </div>
+
+                      <button 
+                        onClick={(e) => deleteTodo(todo.id, e)}
+                        className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 p-1 transition ml-1"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {activeTodos.length === 0 && completedTodos.length === 0 && (
+                    <div className="text-center py-10 text-gray-400 text-sm">
+                      计划空空如也，让 AI 帮你写点什么吧。
+                    </div>
+                  )}
+                </div>
+
+                {/* Completed Todos */}
+                {completedTodos.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 px-2">已完成</h3>
+                    <div className="space-y-2">
+                      {completedTodos.map(todo => (
+                        <div 
+                          key={todo.id} 
+                          onClick={() => setSelectedTodoId(todo.id)}
+                          className={`
+                            group flex items-center gap-3 p-3.5 rounded-xl border transition-all cursor-pointer
+                            ${selectedTodoId === todo.id ? 'bg-indigo-50/50 border-indigo-100' : 'bg-white/50 border-transparent'}
+                          `}
+                        >
+                          <button onClick={(e) => toggleTodo(todo.id, e)} className="text-indigo-500 flex-shrink-0">
+                            <CheckCircle2 className="w-5 h-5" />
+                          </button>
+                          <span className="flex-1 text-sm text-gray-400 line-through decoration-gray-300 truncate">
+                            {todo.text}
+                          </span>
+                           <button 
+                            onClick={(e) => deleteTodo(todo.id, e)}
+                            className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 p-1 transition"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* --- Right Panel: Chat OR Todo Details --- */}
+            <section className="flex-1 flex flex-col bg-white min-h-[50vh] md:min-h-0 relative">
+              
+              {/* === VIEW 1: AI Chat === */}
+              <div className={`absolute inset-0 flex flex-col transition-all duration-300 ease-in-out ${selectedTodoId ? 'opacity-0 translate-x-10 pointer-events-none' : 'opacity-100 translate-x-0'}`}>
+                <div className="p-4 border-b border-gray-100 bg-white/80 backdrop-blur sticky top-0 z-10 shrink-0">
+                  <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4" /> AI 助理
+                  </h2>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                  {activePlan.chat.map((msg, idx) => (
+                    <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'ai' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-600'}`}>
+                        {msg.role === 'ai' ? <Bot className="w-5 h-5" /> : <User className="w-5 h-5" />}
+                      </div>
+                      <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                        msg.role === 'user' 
+                          ? 'bg-indigo-600 text-white rounded-tr-none' 
+                          : 'bg-gray-50 border border-gray-100 text-gray-800 rounded-tl-none'
+                      }`}>
+                        {msg.text}
+                      </div>
+                    </div>
+                  ))}
+                  {isTyping && (
+                    <div className="flex gap-3">
+                       <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+                        <Bot className="w-5 h-5" />
+                      </div>
+                      <div className="bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-none px-4 py-3 flex items-center gap-1">
+                        <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                        <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                        <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                <div className="p-4 bg-white border-t border-gray-100 shrink-0">
+                  <div className="relative flex items-center">
+                    <input 
+                      type="text"
+                      value={inputMessage}
+                      onChange={(e) => setInputMessage(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                      placeholder="告诉 AI 帮你安排什么..."
+                      className="w-full pl-4 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+                      disabled={isTyping}
+                    />
+                    <button 
+                      onClick={handleSendMessage}
+                      disabled={isTyping || !inputMessage.trim()}
+                      className="absolute right-2 p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg disabled:opacity-50 disabled:hover:bg-transparent transition"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </>
+        ) : null}
+
+        {/* === GLOBAL VIEW: Todo Details Slide-over Panel === */}
+        <section className={`
+          absolute inset-y-0 right-0 w-full md:w-[45%] lg:w-[40%] bg-white shadow-2xl md:shadow-[-8px_0_24px_rgba(0,0,0,0.08)]
+          border-l border-gray-100 transition-transform duration-300 ease-in-out z-50 flex flex-col
+          ${selectedTodoId ? 'translate-x-0' : 'translate-x-full pointer-events-none'}
+        `}>
+          {selectedTodo && (
+            <>
+              {/* Details Header */}
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+                <button 
+                  onClick={() => setSelectedTodoId(null)}
+                  className="flex items-center gap-1 text-sm font-medium text-gray-500 hover:text-indigo-600 transition"
+                >
+                  <ArrowRight className="w-4 h-4 rotate-180" />
+                  关闭面板
+                </button>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded truncate max-w-[150px]">
+                    所属计划: {selectedTodo.planTitle}
+                  </span>
+                  <button 
+                    onClick={(e) => deleteTodo(selectedTodo.id, e)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Checkbox and Title */}
+                <div className="flex items-start gap-4">
+                  <button 
+                    onClick={(e) => toggleTodo(selectedTodo.id, e)} 
+                    className={`mt-1 flex-shrink-0 transition-colors ${selectedTodo.completed ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
+                  >
+                    {selectedTodo.completed ? <CheckCircle2 className="w-6 h-6" /> : <Circle className="w-6 h-6" />}
+                  </button>
+                  <textarea
+                    value={selectedTodo.text}
+                    onChange={(e) => updateSelectedTodo({ text: e.target.value })}
+                    className={`w-full text-xl font-bold bg-transparent border-none focus:ring-0 resize-none overflow-hidden transition-colors ${selectedTodo.completed ? 'text-gray-400 line-through' : 'text-gray-800'}`}
+                    rows={2}
+                    placeholder="任务标题"
+                  />
+                </div>
+
+                <hr className="border-gray-100" />
+
+                {/* Priority */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
+                    <Flag className="w-4 h-4" /> 优先级
+                  </label>
+                  <div className="flex gap-2">
+                    {['none', 'low', 'medium', 'high'].map(p => (
+                      <button
+                        key={p}
+                        onClick={() => updateSelectedTodo({ priority: p })}
+                        className={`px-3 py-1.5 text-sm rounded-lg border transition-all capitalize
+                          ${selectedTodo.priority === p 
+                            ? (p === 'high' ? 'bg-red-50 border-red-200 text-red-700 font-medium' : 
+                               p === 'medium' ? 'bg-yellow-50 border-yellow-200 text-yellow-700 font-medium' :
+                               p === 'low' ? 'bg-blue-50 border-blue-200 text-blue-700 font-medium' :
+                               'bg-gray-100 border-gray-300 text-gray-700 font-medium')
+                            : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                          }
+                        `}
+                      >
+                        {p === 'none' ? '无' : p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Due Date */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
+                    <Calendar className="w-4 h-4" /> 截止日期
+                  </label>
+                  <input 
+                    type="date"
+                    value={selectedTodo.dueDate || ''}
+                    onChange={(e) => updateSelectedTodo({ dueDate: e.target.value })}
+                    className="w-full max-w-[200px] px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  />
+                </div>
+
+                <hr className="border-gray-100" />
+
+                {/* Notes */}
+                <div className="space-y-2 flex-1 flex flex-col">
+                  <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
+                    <AlignLeft className="w-4 h-4" /> 备注与详情
+                  </label>
+                  <textarea
+                    value={selectedTodo.notes || ''}
+                    onChange={(e) => updateSelectedTodo({ notes: e.target.value })}
+                    placeholder="添加更详细的描述或步骤..."
+                    className="w-full flex-1 min-h-[150px] p-3 bg-gray-50 border border-gray-100 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all resize-y"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}

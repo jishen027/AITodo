@@ -1,0 +1,104 @@
+'use client';
+
+import { X, Plus, CheckCircle2, ListTodo, Trash2, LayoutDashboard, CalendarDays } from 'lucide-react';
+import { Plan } from '@/types';
+
+interface SidebarProps {
+  plans: Plan[];
+  activePlanId: string;
+  currentView: 'plans' | 'calendar';
+  isOpen: boolean;
+  onClose: () => void;
+  onSelectPlan: (id: string) => void;
+  onDeletePlan: (id: string) => void;
+  onCreatePlan: () => void;
+  onSetView: (view: 'plans' | 'calendar') => void;
+}
+
+export default function Sidebar({
+  plans,
+  activePlanId,
+  currentView,
+  isOpen,
+  onClose,
+  onSelectPlan,
+  onDeletePlan,
+  onCreatePlan,
+  onSetView,
+}: SidebarProps) {
+  return (
+    <aside
+      className={`
+        fixed md:static inset-y-0 left-0 z-30 w-64 bg-gray-50 border-r border-gray-200
+        transform transition-transform duration-300 ease-in-out flex flex-col shrink-0
+        ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+      `}
+    >
+      <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+        <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+          <CheckCircle2 className="w-6 h-6 text-indigo-600" />
+          AI Todo
+        </h1>
+        <button onClick={onClose} className="md:hidden p-1 text-gray-500 hover:bg-gray-200 rounded">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-1">
+        {/* Views */}
+        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2 mt-2">
+          Views
+        </div>
+        <div
+          onClick={() => onSetView('plans')}
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${currentView === 'plans' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'}`}
+        >
+          <LayoutDashboard className={`w-4 h-4 ${currentView === 'plans' ? 'text-indigo-600' : 'text-gray-400'}`} />
+          <span className="text-sm font-medium">Task Plans</span>
+        </div>
+        <div
+          onClick={() => onSetView('calendar')}
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors mb-4 ${currentView === 'calendar' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'}`}
+        >
+          <CalendarDays className={`w-4 h-4 ${currentView === 'calendar' ? 'text-indigo-600' : 'text-gray-400'}`} />
+          <span className="text-sm font-medium">Calendar</span>
+        </div>
+
+        {/* Plans */}
+        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2 mt-4">
+          My Plans
+        </div>
+        {plans.map((plan) => (
+          <div
+            key={plan.id}
+            onClick={() => onSelectPlan(plan.id)}
+            className={`
+              group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors
+              ${activePlanId === plan.id && currentView === 'plans' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'}
+            `}
+          >
+            <div className="flex items-center gap-3 truncate">
+              <ListTodo className={`w-4 h-4 flex-shrink-0 ${activePlanId === plan.id ? 'text-indigo-600' : 'text-gray-400'}`} />
+              <span className="truncate text-sm font-medium">{plan.title}</span>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDeletePlan(plan.id); }}
+              className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 rounded transition flex-shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="p-4 border-t border-gray-200">
+        <button
+          onClick={onCreatePlan}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-indigo-600 transition-colors shadow-sm"
+        >
+          <Plus className="w-4 h-4" /> New Plan
+        </button>
+      </div>
+    </aside>
+  );
+}
