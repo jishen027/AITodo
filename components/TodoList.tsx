@@ -204,17 +204,27 @@ export default function TodoList({
                   <Flag className={`w-3.5 h-3.5 ${getPriorityColor(todo.priority)}`} />
                 )}
                 {todo.dueDate && (
-                  <span className="flex items-center gap-1 text-[11px] text-gray-400 font-medium whitespace-nowrap">
-                    <Calendar className="w-3.5 h-3.5" />
-                    {todo.dueDate}{todo.dueTime ? ` ${todo.dueTime}` : ''}
-                  </span>
+                  <>
+                    {/* desktop: date + time text */}
+                    <span className="hidden md:flex items-center gap-1 text-[11px] text-gray-400 font-medium whitespace-nowrap">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {todo.dueDate}{todo.dueTime ? ` ${todo.dueTime}` : ''}
+                    </span>
+                    {/* mobile: icon only */}
+                    <Calendar className="md:hidden w-3.5 h-3.5 text-gray-400" />
+                  </>
                 )}
                 {todo.notes && <AlignLeft className="w-3.5 h-3.5 text-gray-400" />}
                 {todo.steps.length > 0 && (
-                  <span className="flex items-center gap-1 text-[11px] text-gray-400 font-medium">
-                    <ListChecks className="w-3.5 h-3.5" />
-                    {todo.steps.filter(s => s.completed).length}/{todo.steps.length}
-                  </span>
+                  <>
+                    {/* desktop: icon + count */}
+                    <span className="hidden md:flex items-center gap-1 text-[11px] text-gray-400 font-medium">
+                      <ListChecks className="w-3.5 h-3.5" />
+                      {todo.steps.filter(s => s.completed).length}/{todo.steps.length}
+                    </span>
+                    {/* mobile: icon only */}
+                    <ListChecks className="md:hidden w-3.5 h-3.5 text-gray-400" />
+                  </>
                 )}
               </div>
               <button
