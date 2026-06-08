@@ -184,7 +184,10 @@ export function usePlans() {
   // Load all plans from the database on mount
   useEffect(() => {
     fetch('/api/plans')
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`GET /api/plans failed: ${r.status}`);
+        return r.json();
+      })
       .then((data: Plan[]) => {
         if (Array.isArray(data) && data.length > 0) {
           setPlans(data);

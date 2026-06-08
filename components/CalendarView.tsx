@@ -130,7 +130,7 @@ export default function CalendarView({
               </div>
             ))}
             {generateCalendarDays(currentDate).map((date, i) => {
-              if (!date) return <div key={`empty-${i}`} className="bg-white min-h-[100px]" />;
+              if (!date) return <div key={`empty-${i}`} className="bg-white min-h-[56px] md:min-h-[100px]" />;
               const dateStr = formatYMD(date);
               const dayTodos = allTodos
                 .filter((t) => t.dueDate === dateStr)
@@ -138,7 +138,7 @@ export default function CalendarView({
               const isToday = dateStr === today;
 
               return (
-                <div key={dateStr} className="bg-white min-h-[100px] p-2 flex flex-col hover:bg-gray-50 transition-colors">
+                <div key={dateStr} className="bg-white min-h-[56px] md:min-h-[100px] p-1.5 md:p-2 flex flex-col hover:bg-gray-50 transition-colors">
                   <div className="flex justify-between items-center mb-1">
                     <span className={`text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-indigo-600 text-white' : 'text-gray-700'}`}>
                       {date.getDate()}

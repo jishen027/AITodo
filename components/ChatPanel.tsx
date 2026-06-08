@@ -34,16 +34,12 @@ export default function ChatPanel({ chat, isTyping, inputMessage, visible, planT
   }, [isTyping, visible]);
 
   return (
-    <div
-      className={`absolute inset-0 flex flex-col transition-all duration-300 ease-in-out ${
-        visible ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'
-      }`}
-    >
+    <div className={`absolute inset-0 flex flex-col ${!visible ? 'pointer-events-none' : ''}`}>
       <div className="relative p-4 border-b border-gray-100 bg-white/80 backdrop-blur sticky top-0 z-10 shrink-0 flex items-center">
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2 shrink-0">
           <MessageSquare className="w-4 h-4" /> AI Assistant
         </h2>
-        <span className="absolute left-0 right-0 text-center text-sm font-semibold text-gray-800 truncate px-32 pointer-events-none">
+        <span className="hidden md:block absolute left-0 right-0 text-center text-sm font-semibold text-gray-800 truncate px-32 pointer-events-none">
           {planTitle}
         </span>
       </div>
