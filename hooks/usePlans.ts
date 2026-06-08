@@ -104,39 +104,32 @@ interface PlanUpdate {
 
 type ControlToken = 'asking' | 'proposed' | 'confirmed' | null;
 
-// Strip the trailing control token and report which one was present.
 function stripControlToken(text: string): { text: string; token: ControlToken } {
   let token: ControlToken = null;
   if (/<<<\s*CONFIRMED\s*>>>/i.test(text)) token = 'confirmed';
   else if (/<<<\s*PROPOSED\s*>>>/i.test(text)) token = 'proposed';
   else if (/<<<\s*ASKING\s*>>>/i.test(text)) token = 'asking';
-  // Strip all known tokens (including the legacy READY) from displayed text.
   const cleaned = text.replace(/<<<\s*(CONFIRMED|PROPOSED|ASKING|READY)\s*>>>/gi, '').trim();
   return { text: cleaned, token };
 }
 
-// Extract an optional JSON plan update from a model response.
-// `todos` is null when no valid JSON block was found.
 function parsePlanUpdate(responseText: string, currentTodos: Todo[]): PlanUpdate {
   const jsonRegex = /```(?:json)?\s*([\s\S]*?)```/;
   const match = responseText.match(jsonRegex);
   if (!match) return { text: responseText, todos: null, planTitle: null };
 
   try {
-    // Strip JS-style comment lines the AI sometimes inserts (e.g. "// ...")
     const sanitized = match[1]
       .split('\n')
       .filter((line) => !line.trim().startsWith('//'))
       .join('\n');
     const parsed = JSON.parse(sanitized);
 
-    // Completed todos are locked — returned verbatim, AI changes ignored.
     const lockedTodos = new Map(
       currentTodos.filter((t) => t.completed).map((t) => [t.id, t])
     );
     const normalize = (list: Todo[]) => {
       const mapped = list.map((t) => lockedTodos.get(t.id) ?? { ...t, steps: t.steps ?? [], dueTime: t.dueTime ?? '' });
-      // Re-attach any completed todos the AI dropped, so finished work is never lost.
       const presentIds = new Set(mapped.map((t) => t.id));
       const dropped = [...lockedTodos.values()].filter((t) => !presentIds.has(t.id));
       return [...mapped, ...dropped];
@@ -162,37 +155,45 @@ function parsePlanUpdate(responseText: string, currentTodos: Todo[]): PlanUpdate
 }
 
 // ---------------------------------------------------------------------------
-// Initial seed data
+// DB persistence helpers
 // ---------------------------------------------------------------------------
-const INITIAL_PLANS: Plan[] = [
-  {
-    id: 'default-1',
-    title: 'Welcome to AI Todo',
-    todos: [
-      { id: 'todo-1', text: 'Create a new Plan in the sidebar', completed: false, notes: '', dueDate: '', dueTime: '', priority: 'none', steps: [] },
-      { id: 'todo-2', text: 'Click any task to view and edit details', completed: false, notes: 'Just like Microsoft To Do, you can add detailed descriptions, sub-steps, and notes here.', dueDate: '2026-06-10', dueTime: '09:00', priority: 'high', steps: [{ id: 'step-1', text: 'Click this task', completed: false }, { id: 'step-2', text: 'Edit the title, priority, or due date', completed: false }, { id: 'step-3', text: 'Add your own steps below', completed: false }] },
-      { id: 'todo-3', text: 'Tell the AI your goal in the chat', completed: false, notes: '', dueDate: '', dueTime: '', priority: 'none', steps: [] },
-    ],
-    chat: [{ role: 'ai', text: "Hi! I'm your AI planning assistant. I can help you set SMART goals, map out task dependencies, track progress, and propose recovery plans when things go off track. What goal do you want to achieve?" }],
-  },
-];
+function persistTodos(planId: string, todos: Todo[]) {
+  fetch(`/api/plans/${planId}/todos`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ todos }),
+  }).catch(console.error);
+}
 
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 export function usePlans() {
-  const [plans, setPlans] = useState<Plan[]>(INITIAL_PLANS);
-  const [activePlanId, setActivePlanId] = useState<string | null>('default-1');
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [newTaskText, setNewTaskText] = useState('');
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [editedTitle, setEditedTitle] = useState('');
-  // IDs of todos the AI just created — consumed by TodoList to animate them in
   const [aiAddedTodoIds, setAiAddedTodoIds] = useState<string[]>([]);
-  // True after the AI has proposed a plan (<<<PROPOSED>>>) and is awaiting the user's approval
   const pendingProposalRef = useRef(false);
+
+  // Load all plans from the database on mount
+  useEffect(() => {
+    fetch('/api/plans')
+      .then((r) => r.json())
+      .then((data: Plan[]) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setPlans(data);
+          setActivePlanId(data[0].id);
+        }
+      })
+      .catch(console.error)
+      .finally(() => setIsLoading(false));
+  }, []);
 
   // --- Computed ---
   const activePlan = plans.find((p) => p.id === activePlanId) ?? plans[0] ?? null;
@@ -232,6 +233,11 @@ export function usePlans() {
     };
     setPlans((prev) => [newPlan, ...prev]);
     setActivePlanId(newPlan.id);
+    fetch('/api/plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newPlan),
+    }).catch(console.error);
   };
 
   const deletePlan = (id: string) => {
@@ -240,11 +246,17 @@ export function usePlans() {
       if (activePlanId === id) setActivePlanId(next[0]?.id ?? null);
       return next;
     });
+    fetch(`/api/plans/${id}`, { method: 'DELETE' }).catch(console.error);
   };
 
   const updatePlanTitle = (id: string, newTitle: string) => {
     setPlans((prev) => prev.map((p) => (p.id === id ? { ...p, title: newTitle } : p)));
     setEditingTitleId(null);
+    fetch(`/api/plans/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTitle }),
+    }).catch(console.error);
   };
 
   // --- Todo Helpers ---
@@ -259,7 +271,15 @@ export function usePlans() {
     e?.stopPropagation();
     const plan = findPlanByTodoId(todoId);
     if (!plan) return;
-    updateTodos(plan.id, plan.todos.map((t) => (t.id === todoId ? { ...t, completed: !t.completed } : t)));
+    const todo = plan.todos.find((t) => t.id === todoId);
+    if (!todo) return;
+    const newCompleted = !todo.completed;
+    updateTodos(plan.id, plan.todos.map((t) => (t.id === todoId ? { ...t, completed: newCompleted } : t)));
+    fetch(`/api/plans/${plan.id}/todos/${todoId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed: newCompleted }),
+    }).catch(console.error);
   };
 
   const deleteTodo = (todoId: string, e?: React.MouseEvent) => {
@@ -268,15 +288,25 @@ export function usePlans() {
     if (!plan) return;
     updateTodos(plan.id, plan.todos.filter((t) => t.id !== todoId));
     if (selectedTodoId === todoId) setSelectedTodoId(null);
+    fetch(`/api/plans/${plan.id}/todos/${todoId}`, { method: 'DELETE' }).catch(console.error);
   };
 
   const addTodoManual = (e: React.KeyboardEvent) => {
     if (e.key !== 'Enter' || !newTaskText.trim() || !activePlan) return;
-    updateTodos(activePlan.id, [
-      ...activePlan.todos,
-      { id: generateId(), text: newTaskText.trim(), completed: false, notes: '', dueDate: '', dueTime: '', priority: 'none', steps: [] },
-    ]);
+    const newTodo: Todo = {
+      id: generateId(),
+      text: newTaskText.trim(),
+      completed: false,
+      notes: '',
+      dueDate: '',
+      dueTime: '',
+      priority: 'none',
+      steps: [],
+    };
+    const newTodos = [...activePlan.todos, newTodo];
+    updateTodos(activePlan.id, newTodos);
     setNewTaskText('');
+    persistTodos(activePlan.id, newTodos);
   };
 
   const updateSelectedTodo = (updates: Partial<Todo>) => {
@@ -284,6 +314,11 @@ export function usePlans() {
     const plan = findPlanByTodoId(selectedTodoId);
     if (!plan) return;
     updateTodos(plan.id, plan.todos.map((t) => (t.id === selectedTodoId ? { ...t, ...updates } : t)));
+    fetch(`/api/plans/${plan.id}/todos/${selectedTodoId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch(console.error);
   };
 
   // --- Chat / Agent Handler ---
@@ -291,17 +326,17 @@ export function usePlans() {
     if (!inputMessage.trim() || !activePlan) return;
 
     const userText = inputMessage.trim();
+    const planId = activePlan.id;
+    const currentTodos = activePlan.todos;
     setInputMessage('');
 
-    // Optimistically append user message to UI
     setPlans((prev) =>
       prev.map((p) =>
-        p.id === activePlan.id ? { ...p, chat: [...p.chat, { role: 'user', text: userText }] } : p
+        p.id === planId ? { ...p, chat: [...p.chat, { role: 'user', text: userText }] } : p
       )
     );
     setIsTyping(true);
 
-    // Build full conversation history for the model (skip the opening greeting)
     const history: ApiMessage[] = [
       ...activePlan.chat.slice(1).map((msg) => ({
         role: (msg.role === 'ai' ? 'assistant' : 'user') as ApiMessage['role'],
@@ -314,14 +349,8 @@ export function usePlans() {
     const rawResponse = await callChat(history, systemInstruction);
 
     const { text: cleanedText, token } = stripControlToken(rawResponse);
-    let update = parsePlanUpdate(cleanedText, activePlan.todos);
+    let update = parsePlanUpdate(cleanedText, currentTodos);
 
-    // Decide whether the app should force a plan to be committed when the model
-    // produced no JSON. This happens when:
-    //   1. The model explicitly confirmed (<<<CONFIRMED>>>), OR
-    //   2. We were awaiting approval of a proposed plan and the model neither
-    //      kept asking nor re-proposed (e.g. it claimed "plan updated" but
-    //      forgot the JSON, or dropped the control token entirely).
     const shouldForce =
       !update.todos &&
       (token === 'confirmed' ||
@@ -337,36 +366,58 @@ export function usePlans() {
             'Output the complete plan now as a single ```json code block following the schema exactly. Output ONLY the JSON block — no prose, no questions, no deferral.',
         },
       ];
-      const forced = parsePlanUpdate(await callChat(forcedHistory, systemInstruction), activePlan.todos);
+      const forced = parsePlanUpdate(await callChat(forcedHistory, systemInstruction), currentTodos);
       if (forced.todos) {
         update = { text: update.text, todos: forced.todos, planTitle: forced.planTitle ?? update.planTitle };
       }
     }
 
-    // Flag newly-created todos so the list can animate them in
     if (update.todos) {
-      const prevIds = new Set(activePlan.todos.map((t) => t.id));
+      const prevIds = new Set(currentTodos.map((t) => t.id));
       const addedIds = update.todos.filter((t) => !prevIds.has(t.id)).map((t) => t.id);
       if (addedIds.length) setAiAddedTodoIds(addedIds);
     }
 
+    const aiText = update.text || 'Tasks updated!';
+
     setPlans((prev) =>
       prev.map((p) =>
-        p.id === activePlan.id
+        p.id === planId
           ? {
               ...p,
               ...(update.planTitle ? { title: update.planTitle } : {}),
               ...(update.todos ? { todos: update.todos } : {}),
-              chat: [...p.chat, { role: 'ai', text: update.text || 'Tasks updated!' }],
+              chat: [...p.chat, { role: 'ai', text: aiText }],
             }
           : p
       )
     );
 
-    // Track proposal state for the next turn: a plan was committed → resolved;
-    // the model proposed a plan → awaiting approval; otherwise unchanged-clear.
-    pendingProposalRef.current = update.todos ? false : token === 'proposed';
+    // Persist chat messages
+    fetch(`/api/plans/${planId}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([
+        { role: 'user', text: userText },
+        { role: 'ai', text: aiText },
+      ]),
+    }).catch(console.error);
 
+    // Persist todo updates
+    if (update.todos) {
+      persistTodos(planId, update.todos);
+    }
+
+    // Persist plan title rename
+    if (update.planTitle) {
+      fetch(`/api/plans/${planId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: update.planTitle }),
+      }).catch(console.error);
+    }
+
+    pendingProposalRef.current = update.todos ? false : token === 'proposed';
     setIsTyping(false);
   };
 
@@ -385,6 +436,7 @@ export function usePlans() {
     inputMessage,
     setInputMessage,
     isTyping,
+    isLoading,
     newTaskText,
     setNewTaskText,
     editingTitleId,

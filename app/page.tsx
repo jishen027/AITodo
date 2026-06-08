@@ -27,6 +27,7 @@ export default function Home() {
     inputMessage,
     setInputMessage,
     isTyping,
+    isLoading,
     newTaskText,
     setNewTaskText,
     editingTitleId,
@@ -48,6 +49,17 @@ export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [currentView, setCurrentView] = useState<View>('plans');
   const [currentDate, setCurrentDate] = useState(new Date());
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-400">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-indigo-300 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm">Loading plans…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!activePlanId && plans.length === 0) {
     return (

@@ -1,6 +1,7 @@
 'use client';
 
-import { X, Plus, CheckCircle2, ListTodo, Trash2, LayoutDashboard, CalendarDays } from 'lucide-react';
+import { X, Plus, CheckCircle2, ListTodo, Trash2, LayoutDashboard, CalendarDays, LogOut } from 'lucide-react';
+import { useSession, signOut } from 'next-auth/react';
 import { Plan } from '@/types';
 
 interface SidebarProps {
@@ -26,6 +27,15 @@ export default function Sidebar({
   onCreatePlan,
   onSetView,
 }: SidebarProps) {
+  const { data: session } = useSession();
+  const userName = session?.user?.name ?? session?.user?.email ?? '';
+  const initials = userName
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+
   return (
     <aside
       className={`
@@ -91,13 +101,28 @@ export default function Sidebar({
         ))}
       </div>
 
-      <div className="p-4 border-t border-gray-200">
+      <div className="p-4 border-t border-gray-200 space-y-3">
         <button
           onClick={onCreatePlan}
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-indigo-600 transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4" /> New Plan
         </button>
+
+        {/* User info + sign out */}
+        <div className="flex items-center gap-2 px-1">
+          <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+            {initials || '?'}
+          </div>
+          <span className="text-xs text-gray-600 truncate flex-1">{userName}</span>
+          <button
+            onClick={() => signOut({ callbackUrl: '/login' })}
+            title="Sign out"
+            className="p-1 text-gray-400 hover:text-red-500 rounded transition flex-shrink-0"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </aside>
   );
