@@ -1,11 +1,14 @@
 # ── Stage 1: install dependencies ─────────────────────────────────────────────
 FROM node:20-alpine AS deps
+# libc6-compat is required for Next.js SWC binaries (glibc-linked) on musl/Alpine
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 
 # ── Stage 2: build ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
