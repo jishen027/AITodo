@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { gsap } from 'gsap';
-import { Plus, Circle, CheckCircle2, Trash2, Flag, Calendar, AlignLeft, Edit2, ListChecks } from 'lucide-react';
+import { Plus, Circle, CheckCircle2, Trash2, Flag, Calendar, AlignLeft, Edit2, ListChecks, Bot, Sparkles } from 'lucide-react';
 import { Plan, Todo } from '@/types';
 import { getPriorityColor } from '@/lib/utils';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -16,6 +16,7 @@ interface TodoListProps {
   editingTitleId: string | null;
   editedTitle: string;
   aiAddedTodoIds: string[];
+  isAiUpdating: boolean;
   onAnimationDone: () => void;
   onSelectTodo: (id: string) => void;
   onToggleTodo: (id: string, e?: React.MouseEvent) => void;
@@ -36,6 +37,7 @@ export default function TodoList({
   editingTitleId,
   editedTitle,
   aiAddedTodoIds,
+  isAiUpdating,
   onAnimationDone,
   onSelectTodo,
   onToggleTodo,
@@ -48,6 +50,8 @@ export default function TodoList({
 }: TodoListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const completedListRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const scanBarRef = useRef<HTMLDivElement>(null);
   // IDs of items that just moved between lists — used to trigger the enter animation
   const [justMovedIds, setJustMovedIds] = useState<string[]>([]);
   // ID of the todo awaiting delete confirmation
@@ -95,6 +99,22 @@ export default function TodoList({
     }
   }, [justMovedIds]);
 
+  // Overlay entrance + scan bar when AI is updating
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    const scanBar = scanBarRef.current;
+    if (!isAiUpdating || !overlay || !scanBar) return;
+
+    gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: 'power2.out' });
+
+    gsap.set(scanBar, { xPercent: -100 });
+    const tl = gsap.timeline({ repeat: -1 });
+    tl.to(scanBar, { xPercent: 200, duration: 1.6, ease: 'power1.inOut' })
+      .set(scanBar, { xPercent: -100 });
+
+    return () => { tl.kill(); };
+  }, [isAiUpdating]);
+
   // Animate out → call toggle → animate in (in new list)
   const handleToggle = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -135,7 +155,36 @@ export default function TodoList({
   }, [pendingDeleteId, onDeleteTodo]);
 
   return (
-    <section className="flex-1 md:flex-none md:w-[45%] flex flex-col bg-[#FAFAFA] overflow-y-auto border-r border-gray-200">
+    <section className="flex-1 md:flex-none md:w-[45%] flex flex-col bg-[#FAFAFA] border-r border-gray-200 relative overflow-hidden">
+
+      {/* AI updating overlay */}
+      {isAiUpdating && (
+        <div ref={overlayRef} className="absolute inset-0 z-20 flex flex-col pointer-events-auto">
+          {/* Scan bar */}
+          <div className="h-0.5 bg-indigo-50 overflow-hidden shrink-0">
+            <div ref={scanBarRef} className="h-full w-1/2 bg-gradient-to-r from-transparent via-indigo-500 to-transparent" />
+          </div>
+          {/* Frosted backdrop */}
+          <div className="flex-1 bg-white/60 backdrop-blur-[2px] flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 py-6 px-10 rounded-2xl bg-white/95 shadow-xl shadow-indigo-100/60 border border-indigo-100">
+              <div className="relative">
+                <div className="w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center">
+                  <Bot className="w-6 h-6 text-indigo-500" />
+                </div>
+                <Sparkles className="absolute -top-1 -right-1 w-4 h-4 text-indigo-400 animate-pulse" />
+              </div>
+              <p className="text-sm font-semibold text-gray-700">AI is updating your plan</p>
+              <div className="flex gap-1.5">
+                <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto">
       <div className="p-6 md:p-8 w-full mx-auto">
 
         {/* Editable Title */}
@@ -278,6 +327,7 @@ export default function TodoList({
           </div>
         )}
       </div>
+      </div>{/* end scrollable */}
 
       {/* Delete confirmation modal */}
       {pendingDeleteId && (() => {

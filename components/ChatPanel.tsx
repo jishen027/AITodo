@@ -9,6 +9,7 @@ import { ChatMessage } from '@/types';
 interface ChatPanelProps {
   chat: ChatMessage[];
   isTyping: boolean;
+  streamingText: string;
   inputMessage: string;
   visible: boolean;
   planTitle: string;
@@ -16,7 +17,7 @@ interface ChatPanelProps {
   onSend: () => void;
 }
 
-export default function ChatPanel({ chat, isTyping, inputMessage, visible, planTitle, onInputChange, onSend }: ChatPanelProps) {
+export default function ChatPanel({ chat, isTyping, streamingText, inputMessage, visible, planTitle, onInputChange, onSend }: ChatPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -24,7 +25,7 @@ export default function ChatPanel({ chat, isTyping, inputMessage, visible, planT
     if (visible) {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [chat, isTyping, visible]);
+  }, [chat, isTyping, streamingText, visible]);
 
   // Re-focus the input whenever the AI finishes responding
   useEffect(() => {
@@ -116,11 +117,56 @@ export default function ChatPanel({ chat, isTyping, inputMessage, visible, planT
             <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
               <Bot className="w-5 h-5" />
             </div>
-            <div className="bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-none px-4 py-3 flex items-center gap-1">
-              <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
+            {streamingText ? (
+              <div className="max-w-[80%] rounded-2xl rounded-tl-none px-4 py-3 text-sm leading-relaxed bg-gray-50 border border-gray-100 text-gray-800 prose prose-sm prose-indigo max-w-none">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    h1: ({ children }) => <h1 className="text-base font-bold text-gray-900 mt-3 mb-1 first:mt-0">{children}</h1>,
+                    h2: ({ children }) => <h2 className="text-sm font-bold text-gray-900 mt-3 mb-1 first:mt-0">{children}</h2>,
+                    h3: ({ children }) => <h3 className="text-sm font-semibold text-gray-800 mt-2 mb-1 first:mt-0">{children}</h3>,
+                    p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                    ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>,
+                    ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>,
+                    li: ({ children }) => <li className="text-gray-700">{children}</li>,
+                    strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+                    em: ({ children }) => <em className="italic text-gray-700">{children}</em>,
+                    code: ({ children, className }) => {
+                      const isBlock = className?.startsWith('language-');
+                      return isBlock ? (
+                        <code className="block bg-gray-100 rounded-lg px-3 py-2 text-xs font-mono text-gray-800 overflow-x-auto my-2 whitespace-pre-wrap">
+                          {children}
+                        </code>
+                      ) : (
+                        <code className="bg-gray-100 rounded px-1 py-0.5 text-xs font-mono text-indigo-700">{children}</code>
+                      );
+                    },
+                    pre: ({ children }) => <pre className="bg-gray-100 rounded-lg p-3 overflow-x-auto my-2 text-xs">{children}</pre>,
+                    table: ({ children }) => (
+                      <div className="overflow-x-auto my-2">
+                        <table className="min-w-full text-xs border-collapse">{children}</table>
+                      </div>
+                    ),
+                    thead: ({ children }) => <thead className="bg-indigo-50">{children}</thead>,
+                    th: ({ children }) => <th className="px-3 py-1.5 text-left font-semibold text-indigo-700 border border-gray-200">{children}</th>,
+                    td: ({ children }) => <td className="px-3 py-1.5 border border-gray-200 text-gray-700">{children}</td>,
+                    tr: ({ children }) => <tr className="even:bg-gray-50">{children}</tr>,
+                    blockquote: ({ children }) => (
+                      <blockquote className="border-l-4 border-indigo-300 pl-3 italic text-gray-600 my-2">{children}</blockquote>
+                    ),
+                    hr: () => <hr className="border-gray-200 my-3" />,
+                  }}
+                >
+                  {streamingText}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div className="bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-none px-4 py-3 flex items-center gap-1">
+                <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            )}
           </div>
         )}
 

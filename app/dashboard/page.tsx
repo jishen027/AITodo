@@ -27,6 +27,7 @@ export default function Home() {
     inputMessage,
     setInputMessage,
     isTyping,
+    streamingText,
     isLoading,
     newTaskText,
     setNewTaskText,
@@ -168,6 +169,7 @@ export default function Home() {
                 editingTitleId={editingTitleId}
                 editedTitle={editedTitle}
                 aiAddedTodoIds={aiAddedTodoIds}
+                isAiUpdating={isTyping}
                 onAnimationDone={clearAiAddedTodoIds}
                 onSelectTodo={setSelectedTodoId}
                 onToggleTodo={toggleTodo}
@@ -185,6 +187,7 @@ export default function Home() {
               <ChatPanel
                 chat={activePlan.chat}
                 isTyping={isTyping}
+                streamingText={streamingText}
                 inputMessage={inputMessage}
                 visible={!selectedTodoId}
                 planTitle={activePlan.title}

@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { Plan, Todo, TodoWithPlan } from '@/types';
 import { generateId } from '@/lib/utils';
-import { callChat, type ApiMessage } from '@/lib/api';
+import { callChat, callChatStream, type ApiMessage } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
 // Agent System Instruction
@@ -174,12 +175,13 @@ export function usePlans() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [inputMessage, setInputMessage] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  const [typingPlanIds, setTypingPlanIds] = useState<Record<string, boolean>>({});
+  const [streamingTexts, setStreamingTexts] = useState<Record<string, string>>({});
   const [newTaskText, setNewTaskText] = useState('');
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [editedTitle, setEditedTitle] = useState('');
   const [aiAddedTodoIds, setAiAddedTodoIds] = useState<string[]>([]);
-  const pendingProposalRef = useRef(false);
+  const pendingProposalRef = useRef<Record<string, boolean>>({});
 
   // Load all plans from the database on mount
   useEffect(() => {
@@ -223,7 +225,6 @@ export function usePlans() {
 
   useEffect(() => {
     setSelectedTodoId(null);
-    pendingProposalRef.current = false;
   }, [activePlanId]);
 
   // --- Plan Handlers ---
@@ -338,7 +339,8 @@ export function usePlans() {
         p.id === planId ? { ...p, chat: [...p.chat, { role: 'user', text: userText }] } : p
       )
     );
-    setIsTyping(true);
+    setTypingPlanIds((prev) => ({ ...prev, [planId]: true }));
+    setStreamingTexts((prev) => ({ ...prev, [planId]: '' }));
 
     const history: ApiMessage[] = [
       ...activePlan.chat.slice(1).map((msg) => ({
@@ -349,7 +351,10 @@ export function usePlans() {
     ];
 
     const systemInstruction = buildSystemInstruction(activePlan, plans);
-    const rawResponse = await callChat(history, systemInstruction);
+    const rawResponse = await callChatStream(history, systemInstruction, (chunk) => {
+      flushSync(() => setStreamingTexts((prev) => ({ ...prev, [planId]: (prev[planId] ?? '') + chunk })));
+    });
+    setStreamingTexts((prev) => ({ ...prev, [planId]: '' }));
 
     const { text: cleanedText, token } = stripControlToken(rawResponse);
     let update = parsePlanUpdate(cleanedText, currentTodos);
@@ -357,7 +362,7 @@ export function usePlans() {
     const shouldForce =
       !update.todos &&
       (token === 'confirmed' ||
-        (pendingProposalRef.current && token !== 'asking' && token !== 'proposed'));
+        (!!pendingProposalRef.current[planId] && token !== 'asking' && token !== 'proposed'));
 
     if (shouldForce) {
       const forcedHistory: ApiMessage[] = [
@@ -420,8 +425,8 @@ export function usePlans() {
       }).catch(console.error);
     }
 
-    pendingProposalRef.current = update.todos ? false : token === 'proposed';
-    setIsTyping(false);
+    pendingProposalRef.current[planId] = update.todos ? false : token === 'proposed';
+    setTypingPlanIds((prev) => ({ ...prev, [planId]: false }));
   };
 
   return {
@@ -438,7 +443,8 @@ export function usePlans() {
     setSelectedTodoId,
     inputMessage,
     setInputMessage,
-    isTyping,
+    isTyping: !!typingPlanIds[activePlan?.id ?? ''],
+    streamingText: streamingTexts[activePlan?.id ?? ''] ?? '',
     isLoading,
     newTaskText,
     setNewTaskText,
