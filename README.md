@@ -1,5 +1,7 @@
 # AI Todo
 
+**Live:** https://todo.promptnotfound.com
+
 An AI-powered task planning app built with Next.js. Chat with an AI agent to break down goals into actionable tasks, schedule them with due dates and times, and manage them across multiple plans. Data is persisted in PostgreSQL and access is protected by user authentication.
 
 ## Features
@@ -76,7 +78,8 @@ Open [http://localhost:3000](http://localhost:3000). The database tables are cre
 
 ```
 app/
-  page.tsx                        # root page, composes all views
+  page.tsx                        # public landing page
+  dashboard/page.tsx              # main app — plans, tasks, chat, calendar
   login/page.tsx                  # login form
   register/page.tsx               # registration form
   providers.tsx                   # SessionProvider wrapper
@@ -121,3 +124,23 @@ todos          id, plan_id → plans, text, completed, notes, due_date, due_time
 steps          id, todo_id → todos, text, completed, sort_order
 chat_messages  id, plan_id → plans, role, text, created_at
 ```
+
+## Deployment
+
+The app is containerised and deployed via GitHub Actions to a self-hosted runner.
+
+### GitHub Actions secrets required
+
+| Secret | Description |
+|---|---|
+| `DEEPSEEK_API_KEY` | DeepSeek API key |
+| `DEEPSEEK_MODEL` | Model name (defaults to `deepseek-chat`) |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `AUTH_SECRET` | Random base64 string for NextAuth session signing |
+| `NEXTAUTH_URL` | Public URL of the app (e.g. `https://todo.promptnotfound.com`) |
+
+### Docker
+
+The app uses a 3-stage Dockerfile (deps → builder → runner) with Next.js standalone output. A `docker-compose.yml` is provided for deployment. The container listens on port `3000` internally and is exposed on host port `6001`.
+
+The compose file joins `1panel-network` so the app container can reach the 1Panel-managed PostgreSQL instance by its container hostname.

@@ -20,6 +20,8 @@ ENV DATABASE_URL=postgresql://x:x@localhost/x
 ENV AUTH_SECRET=build-placeholder
 ENV NEXTAUTH_URL=http://localhost:3000
 ENV DEEPSEEK_API_KEY=build-placeholder
+ENV AUTH_GOOGLE_ID=build-placeholder
+ENV AUTH_GOOGLE_SECRET=build-placeholder
 RUN npm run build
 
 # ── Stage 3: production runner ────────────────────────────────────────────────

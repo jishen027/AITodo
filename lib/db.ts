@@ -26,7 +26,7 @@ async function createSchema() {
       id          VARCHAR(50)  PRIMARY KEY,
       name        VARCHAR(255) NOT NULL,
       email       VARCHAR(255) UNIQUE NOT NULL,
-      password    VARCHAR(255) NOT NULL,
+      password    VARCHAR(255),
       created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     );
 
@@ -66,8 +66,12 @@ async function createSchema() {
       created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     );
   `);
-  // Safe migration: add user_id to plans if it was created before auth was added
+  // Safe migrations
   await pool.query(`
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE;
+  `);
+  // Allow existing credential users to remain unchanged; Google users have no password
+  await pool.query(`
+    ALTER TABLE users ALTER COLUMN password DROP NOT NULL;
   `);
 }

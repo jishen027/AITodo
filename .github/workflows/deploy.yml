@@ -41,6 +41,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL }}
+          AUTH_GOOGLE_ID: ${{ secrets.AUTH_GOOGLE_ID }}
+          AUTH_GOOGLE_SECRET: ${{ secrets.AUTH_GOOGLE_SECRET }}
         run: |
           {
             echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
@@ -48,6 +50,8 @@ jobs:
             echo "DATABASE_URL=$DATABASE_URL"
             echo "AUTH_SECRET=$AUTH_SECRET"
             echo "NEXTAUTH_URL=$NEXTAUTH_URL"
+            echo "AUTH_GOOGLE_ID=$AUTH_GOOGLE_ID"
+            echo "AUTH_GOOGLE_SECRET=$AUTH_GOOGLE_SECRET"
           } > .env
 
       # ── 3. Docker Buildx ──────────────────────────────────────────────────────
