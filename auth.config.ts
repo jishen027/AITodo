@@ -3,6 +3,7 @@ import type { NextAuthConfig } from 'next-auth';
 // Edge-compatible config — no Node.js-only imports (no pg, no bcryptjs).
 // Used by middleware.ts so it can run in the Edge Runtime.
 export const authConfig: NextAuthConfig = {
+  trustHost: true,
   pages: {
     signIn: '/login',
   },
