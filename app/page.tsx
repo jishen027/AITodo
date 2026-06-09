@@ -1,215 +1,120 @@
-'use client';
+import Link from 'next/link';
+import { CheckCircle2, MessageSquare, CalendarDays, Layers } from 'lucide-react';
 
-import { useState } from 'react';
-import { Menu, ListTodo, MessageSquare } from 'lucide-react';
-import Sidebar from '@/components/Sidebar';
-import TodoList from '@/components/TodoList';
-import ChatPanel from '@/components/ChatPanel';
-import TodoDetails from '@/components/TodoDetails';
-import CalendarView from '@/components/CalendarView';
-import { usePlans } from '@/hooks/usePlans';
+const features = [
+  {
+    icon: MessageSquare,
+    title: 'AI-Powered Planning',
+    description:
+      'Describe your goal in plain language. The AI breaks it down into clear, actionable tasks and refines the plan as you chat.',
+  },
+  {
+    icon: CalendarDays,
+    title: 'Smart Calendar',
+    description:
+      'See all tasks across every plan in a unified calendar view. Due dates, time slots, and priorities at a glance.',
+  },
+  {
+    icon: Layers,
+    title: 'Multiple Plans',
+    description:
+      'Organise work, personal projects, and side goals into separate plans. Switch between them instantly.',
+  },
+];
 
-type View = 'plans' | 'calendar';
-
-export default function Home() {
-  const {
-    plans,
-    activePlan,
-    activePlanId,
-    setActivePlanId,
-    activeTodos,
-    completedTodos,
-    allTodos,
-    sortedAllTodos,
-    selectedTodo,
-    selectedTodoId,
-    setSelectedTodoId,
-    inputMessage,
-    setInputMessage,
-    isTyping,
-    isLoading,
-    newTaskText,
-    setNewTaskText,
-    editingTitleId,
-    setEditingTitleId,
-    editedTitle,
-    setEditedTitle,
-    createPlan,
-    deletePlan,
-    updatePlanTitle,
-    toggleTodo,
-    deleteTodo,
-    addTodoManual,
-    updateSelectedTodo,
-    handleSendMessage,
-    aiAddedTodoIds,
-    clearAiAddedTodoIds,
-  } = usePlans();
-
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [currentView, setCurrentView] = useState<View>('plans');
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [mobilePlanTab, setMobilePlanTab] = useState<'tasks' | 'chat'>('tasks');
-
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-400">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-indigo-300 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm">Loading plans…</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!activePlanId && plans.length === 0) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-500">
-        <div className="text-center">
-          <ListTodo className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-          <p className="text-lg">No plans yet. Create one to get started.</p>
-          <button
-            onClick={createPlan}
-            className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-          >
-            New Plan
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const handleSelectPlan = (id: string) => {
-    setActivePlanId(id);
-    setCurrentView('plans');
-    setIsSidebarOpen(false);
-    setMobilePlanTab('tasks');
-  };
-
-  const handleSetView = (view: View) => {
-    setCurrentView(view);
-    setIsSidebarOpen(false);
-    if (view === 'plans') setMobilePlanTab('tasks');
-  };
-
+export default function LandingPage() {
   return (
-    <div className="flex h-screen bg-white font-sans overflow-hidden">
-      {/* Mobile overlay */}
-      {isSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/20 z-20 md:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
-
-      <Sidebar
-        plans={plans}
-        activePlanId={activePlanId ?? ''}
-        currentView={currentView}
-        isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
-        onSelectPlan={handleSelectPlan}
-        onDeletePlan={deletePlan}
-        onCreatePlan={() => { createPlan(); setCurrentView('plans'); setMobilePlanTab('tasks'); }}
-        onSetView={handleSetView}
-      />
-
-      <main className="flex-1 flex flex-col md:flex-row h-full overflow-hidden bg-white w-full relative">
-        {/* Mobile header */}
-        <div className="md:hidden p-4 border-b border-gray-200 flex items-center justify-between bg-white z-10 shadow-sm shrink-0">
-          <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 text-gray-600">
-            <Menu className="w-6 h-6" />
-          </button>
-          <span className="font-semibold text-gray-800 truncate px-4">
-            {currentView === 'calendar' ? 'Calendar' : activePlan?.title}
-          </span>
-          <div className="w-10" />
-        </div>
-
-        {/* Mobile tab bar — only in plans view with an active plan */}
-        {currentView === 'plans' && activePlan && (
-          <div className="md:hidden flex border-b border-gray-200 bg-white shrink-0">
-            <button
-              onClick={() => setMobilePlanTab('tasks')}
-              className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 border-b-2 transition-colors ${mobilePlanTab === 'tasks' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}`}
-            >
-              <ListTodo className="w-4 h-4" /> Tasks
-            </button>
-            <button
-              onClick={() => setMobilePlanTab('chat')}
-              className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 border-b-2 transition-colors ${mobilePlanTab === 'chat' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}`}
-            >
-              <MessageSquare className="w-4 h-4" /> Chat
-            </button>
+    <div className="min-h-screen bg-white flex flex-col">
+      {/* Nav */}
+      <header className="border-b border-gray-100">
+        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-6 h-6 text-indigo-600" />
+            <span className="font-bold text-gray-900 text-lg">AI Todo</span>
           </div>
-        )}
+          <div className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              Sign In
+            </Link>
+            <Link
+              href="/register"
+              className="text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
+            >
+              Get Started
+            </Link>
+          </div>
+        </div>
+      </header>
 
-        {currentView === 'calendar' ? (
-          <CalendarView
-            allTodos={allTodos}
-            sortedAllTodos={sortedAllTodos}
-            selectedTodoId={selectedTodoId}
-            currentDate={currentDate}
-            onSelectTodo={setSelectedTodoId}
-            onToggleTodo={toggleTodo}
-            onSetCurrentDate={setCurrentDate}
-          />
-        ) : activePlan ? (
-          <>
-            {/* Wrapper uses display:contents so TodoList's flex sizing still applies to main;
-                hidden md:contents hides on mobile when chat tab is active */}
-            <div className={mobilePlanTab === 'chat' ? 'hidden md:contents' : 'contents'}>
-              <TodoList
-                plan={activePlan}
-                activeTodos={activeTodos}
-                completedTodos={completedTodos}
-                selectedTodoId={selectedTodoId}
-                newTaskText={newTaskText}
-                editingTitleId={editingTitleId}
-                editedTitle={editedTitle}
-                aiAddedTodoIds={aiAddedTodoIds}
-                onAnimationDone={clearAiAddedTodoIds}
-                onSelectTodo={setSelectedTodoId}
-                onToggleTodo={toggleTodo}
-                onDeleteTodo={deleteTodo}
-                onAddTodo={addTodoManual}
-                onNewTaskTextChange={setNewTaskText}
-                onStartEditTitle={() => { setEditingTitleId(activePlan.id); setEditedTitle(activePlan.title); }}
-                onEditedTitleChange={setEditedTitle}
-                onUpdatePlanTitle={updatePlanTitle}
-              />
-            </div>
+      {/* Hero */}
+      <section className="flex-1 flex flex-col items-center justify-center text-center px-6 py-24">
+        <div className="inline-flex items-center gap-2 bg-indigo-50 text-indigo-700 text-xs font-semibold px-3 py-1.5 rounded-full mb-6">
+          <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
+          AI-powered task management
+        </div>
+        <h1 className="text-4xl sm:text-5xl font-extrabold text-gray-900 leading-tight max-w-2xl mb-5">
+          Plan smarter.<br />
+          <span className="text-indigo-600">Get more done.</span>
+        </h1>
+        <p className="text-lg text-gray-500 max-w-xl mb-10">
+          Tell the AI what you want to achieve. It builds your plan, tracks your progress,
+          and adapts as things change — all in a single chat.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Link
+            href="/register"
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors shadow-sm"
+          >
+            Start for free
+          </Link>
+          <Link
+            href="/login"
+            className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold rounded-xl transition-colors"
+          >
+            Sign in
+          </Link>
+        </div>
+      </section>
 
-            {/* Chat panel container — hidden on mobile when tasks tab is active */}
-            <section className={`${mobilePlanTab === 'tasks' ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-white md:min-h-0 relative`}>
-              <ChatPanel
-                chat={activePlan.chat}
-                isTyping={isTyping}
-                inputMessage={inputMessage}
-                visible={!selectedTodoId}
-                planTitle={activePlan.title}
-                onInputChange={setInputMessage}
-                onSend={handleSendMessage}
-              />
-              {/* Frosted-glass overlay — fades in when TodoDetails is open */}
-              <div
-                className={`absolute inset-0 z-10 bg-white/40 backdrop-blur-sm pointer-events-none transition-opacity duration-300 ${
-                  selectedTodoId ? 'opacity-100' : 'opacity-0'
-                }`}
-              />
-            </section>
-          </>
-        ) : null}
+      {/* Features */}
+      <section className="bg-gray-50 border-t border-gray-100 py-20 px-6">
+        <div className="max-w-5xl mx-auto">
+          <h2 className="text-2xl font-bold text-gray-900 text-center mb-12">
+            Everything you need to stay on track
+          </h2>
+          <div className="grid sm:grid-cols-3 gap-8">
+            {features.map(({ icon: Icon, title, description }) => (
+              <div key={title} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+                <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center mb-4">
+                  <Icon className="w-5 h-5 text-indigo-600" />
+                </div>
+                <h3 className="font-semibold text-gray-900 mb-2">{title}</h3>
+                <p className="text-sm text-gray-500 leading-relaxed">{description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
-        {/* Global slide-over details panel */}
-        <TodoDetails
-          todo={selectedTodo}
-          onClose={() => setSelectedTodoId(null)}
-          onToggle={toggleTodo}
-          onDelete={deleteTodo}
-          onUpdate={updateSelectedTodo}
-        />
-      </main>
+      {/* CTA banner */}
+      <section className="py-16 px-6 text-center">
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">Ready to get started?</h2>
+        <p className="text-gray-500 mb-8">Create a free account and let AI handle the planning.</p>
+        <Link
+          href="/register"
+          className="inline-block px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors shadow-sm"
+        >
+          Create free account
+        </Link>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-100 py-6 text-center text-xs text-gray-400">
+        © {new Date().getFullYear()} AI Todo. Built with Next.js &amp; DeepSeek.
+      </footer>
     </div>
   );
 }

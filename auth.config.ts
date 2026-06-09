@@ -12,13 +12,14 @@ export const authConfig: NextAuthConfig = {
       const isLoggedIn = !!auth?.user;
       const { pathname } = request.nextUrl;
       const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
+      const isPublicPage = pathname === '/';
 
       // API routes handle their own 401 — don't redirect them to the login page
       if (pathname.startsWith('/api')) return true;
 
-      if (!isLoggedIn && !isAuthPage) return false; // NextAuth redirects to pages.signIn
+      if (!isLoggedIn && !isAuthPage && !isPublicPage) return false;
       if (isLoggedIn && isAuthPage) {
-        return Response.redirect(new URL('/', request.nextUrl));
+        return Response.redirect(new URL('/dashboard', request.nextUrl));
       }
       return true;
     },
