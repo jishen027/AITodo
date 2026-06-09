@@ -1,0 +1,90 @@
+name: Deploy AITodo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: self-hosted
+    timeout-minutes: 20
+
+    steps:
+      # ── 1. Source ─────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        env:
+          GIT_TOKEN: ${{ github.token }}
+        run: |
+          ORIGIN="https://x-access-token:${GIT_TOKEN}@github.com/${{ github.repository }}.git"
+          if git rev-parse --git-dir > /dev/null 2>&1; then
+            git remote set-url origin "$ORIGIN"
+            git fetch origin
+            git reset --hard "${{ github.sha }}"
+            git clean -ffd
+          else
+            git clone "$ORIGIN" .
+            git checkout "${{ github.sha }}"
+          fi
+          # Remove token from remote URL immediately after fetch
+          git remote set-url origin "https://github.com/${{ github.repository }}.git"
+
+      # ── 2. Runtime environment ───────────────────────────────────────────────
+      # Written after checkout so git clean -ffd does not delete it.
+      # docker-compose.yml loads this file via env_file; real secrets never
+      # enter the image layer.
+      - name: Write runtime environment
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL }}
+        run: |
+          {
+            echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
+            echo "DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}"
+            echo "DATABASE_URL=$DATABASE_URL"
+            echo "AUTH_SECRET=$AUTH_SECRET"
+            echo "NEXTAUTH_URL=$NEXTAUTH_URL"
+          } > .env
+
+      # ── 3. Docker Buildx ──────────────────────────────────────────────────────
+      - name: Set up Docker Buildx
+        run: |
+          if ! docker buildx inspect aitodo-builder > /dev/null 2>&1; then
+            docker buildx create \
+              --name aitodo-builder \
+              --driver docker-container \
+              --driver-opt network=host
+          fi
+          docker buildx use aitodo-builder
+          docker buildx inspect --bootstrap
+
+      # ── 4. Build ──────────────────────────────────────────────────────────────
+      - name: Build image
+        run: |
+          mkdir -p /tmp/.buildx-cache
+          docker buildx build \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            --load \
+            --tag aitodo:latest \
+            .
+
+      - name: Rotate build cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      # ── 5. Deploy ─────────────────────────────────────────────────────────────
+      - name: Deploy container
+        run: |
+          docker compose down --remove-orphans --timeout 10
+          docker compose up -d
+
+      # ── 6. Prune old images ───────────────────────────────────────────────────
+      - name: Remove dangling images
+        if: always()
+        run: docker image prune -f
