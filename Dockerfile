@@ -13,6 +13,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# NEXT_PUBLIC_* vars are inlined into the client bundle at build time, so they
+# must arrive here as build args — runtime env cannot change them.
+ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+
 # Placeholder values satisfy Next.js/NextAuth at build time; real values are
 # injected at runtime via the .env file loaded by docker-compose.
 ENV NEXT_TELEMETRY_DISABLED=1
