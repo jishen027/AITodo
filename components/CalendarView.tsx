@@ -3,6 +3,7 @@
 import { CheckCircle2, Circle, Flag, Calendar, ListTodo, ChevronLeft } from 'lucide-react';
 import { TodoWithPlan } from '@/types';
 import { formatYMD } from '@/lib/utils';
+import TodoMap from '@/components/TodoMap';
 
 interface CalendarViewProps {
   allTodos: TodoWithPlan[];
@@ -172,6 +173,9 @@ export default function CalendarView({
               );
             })}
           </div>
+
+          {/* Task locations map */}
+          <TodoMap todos={allTodos} selectedTodoId={selectedTodoId} onSelectTodo={onSelectTodo} />
         </div>
       </section>
     </div>
