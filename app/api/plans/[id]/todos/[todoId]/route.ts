@@ -32,6 +32,9 @@ export async function PATCH(
     if (updates.dueDate !== undefined)   { fields.push(`due_date = $${idx++}`);  values.push(updates.dueDate); }
     if (updates.dueTime !== undefined)   { fields.push(`due_time = $${idx++}`);  values.push(updates.dueTime); }
     if (updates.priority !== undefined)  { fields.push(`priority = $${idx++}`);  values.push(updates.priority); }
+    if (updates.location !== undefined)  { fields.push(`location = $${idx++}`);  values.push(updates.location); }
+    if (updates.locationLat !== undefined) { fields.push(`location_lat = $${idx++}`); values.push(updates.locationLat); }
+    if (updates.locationLng !== undefined) { fields.push(`location_lng = $${idx++}`); values.push(updates.locationLng); }
 
     if (fields.length > 0) {
       values.push(todoId);

@@ -76,6 +76,7 @@ Output a single \`\`\`json block — complete, no truncation:
       "dueDate": "YYYY-MM-DD or empty string",
       "dueTime": "HH:MM 24-hour or empty string — assign a realistic time of day",
       "priority": "high | medium | low | none",
+      "location": "Place name or address where the task happens (e.g. 'PureGym Birmingham City Centre'), or empty string",
       "steps": [
         { "id": "step-id", "text": "Specific actionable step", "completed": false }
       ]
@@ -90,6 +91,7 @@ Output a single \`\`\`json block — complete, no truncation:
 - **No placeholders** — never truncate with \`//...\` or \`/* existing tasks */\`.
 - **steps** — 3–7 specific steps per task. Preserve existing step IDs and completed state.
 - **notes** — always rich; never a single sentence or empty string.
+- **location** — set when the task is tied to a real physical place (gym, store, office, venue) the user mentioned or that is obvious from context. Plain text only — never output coordinates. Keep existing locations unless the user asks to change them; otherwise use an empty string.
 - Claiming the plan is "updated" or "created" without the JSON block in that same message is a failure.
 `.trim();
 }
@@ -129,8 +131,25 @@ function parsePlanUpdate(responseText: string, currentTodos: Todo[]): PlanUpdate
     const lockedTodos = new Map(
       currentTodos.filter((t) => t.completed).map((t) => [t.id, t])
     );
+    const currentById = new Map(currentTodos.map((t) => [t.id, t]));
     const normalize = (list: Todo[]) => {
-      const mapped = list.map((t) => lockedTodos.get(t.id) ?? { ...t, steps: t.steps ?? [], dueTime: t.dueTime ?? '' });
+      const mapped = list.map((t) => {
+        const locked = lockedTodos.get(t.id);
+        if (locked) return locked;
+        // Never trust AI-emitted coordinates: keep the stored ones while the
+        // location text is unchanged, otherwise reset so the map re-geocodes.
+        const existing = currentById.get(t.id);
+        const location = typeof t.location === 'string' ? t.location : existing?.location ?? '';
+        const keepCoords = !!existing && (existing.location ?? '') === location;
+        return {
+          ...t,
+          steps: t.steps ?? [],
+          dueTime: t.dueTime ?? '',
+          location,
+          locationLat: keepCoords ? existing.locationLat ?? null : null,
+          locationLng: keepCoords ? existing.locationLng ?? null : null,
+        };
+      });
       const presentIds = new Set(mapped.map((t) => t.id));
       const dropped = [...lockedTodos.values()].filter((t) => !presentIds.has(t.id));
       return [...mapped, ...dropped];
@@ -305,6 +324,9 @@ export function usePlans() {
       dueDate: '',
       dueTime: '',
       priority: 'none',
+      location: '',
+      locationLat: null,
+      locationLng: null,
       steps: [],
     };
     const newTodos = [...activePlan.todos, newTodo];

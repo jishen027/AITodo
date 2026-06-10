@@ -46,6 +46,9 @@ async function createSchema() {
       due_date    VARCHAR(10)  NOT NULL DEFAULT '',
       due_time    VARCHAR(5)   NOT NULL DEFAULT '',
       priority    VARCHAR(10)  NOT NULL DEFAULT 'none',
+      location     TEXT             NOT NULL DEFAULT '',
+      location_lat DOUBLE PRECISION,
+      location_lng DOUBLE PRECISION,
       sort_order  INTEGER      NOT NULL DEFAULT 0,
       created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     );
@@ -73,5 +76,10 @@ async function createSchema() {
   // Allow existing credential users to remain unchanged; Google users have no password
   await pool.query(`
     ALTER TABLE users ALTER COLUMN password DROP NOT NULL;
+  `);
+  await pool.query(`
+    ALTER TABLE todos ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT '';
+    ALTER TABLE todos ADD COLUMN IF NOT EXISTS location_lat DOUBLE PRECISION;
+    ALTER TABLE todos ADD COLUMN IF NOT EXISTS location_lng DOUBLE PRECISION;
   `);
 }

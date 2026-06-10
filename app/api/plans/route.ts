@@ -18,7 +18,8 @@ export async function GET() {
     const [plansRes, todosRes, stepsRes, chatRes] = await Promise.all([
       pool.query('SELECT id, title FROM plans WHERE user_id = $1 ORDER BY created_at ASC', [userId]),
       pool.query(
-        `SELECT t.id, t.plan_id, t.text, t.completed, t.notes, t.due_date, t.due_time, t.priority, t.sort_order
+        `SELECT t.id, t.plan_id, t.text, t.completed, t.notes, t.due_date, t.due_time, t.priority,
+                t.location, t.location_lat, t.location_lng, t.sort_order
          FROM todos t JOIN plans p ON p.id = t.plan_id WHERE p.user_id = $1 ORDER BY t.plan_id, t.sort_order ASC`,
         [userId]
       ),
@@ -54,6 +55,9 @@ export async function GET() {
         dueDate: r.due_date,
         dueTime: r.due_time,
         priority: r.priority,
+        location: r.location,
+        locationLat: r.location_lat,
+        locationLng: r.location_lng,
         steps: stepsByTodo.get(r.id) ?? [],
       });
       todosByPlan.set(r.plan_id, list);

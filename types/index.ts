@@ -15,6 +15,9 @@ export interface Todo {
   dueTime: string;
   priority: Priority;
   steps: Step[];
+  location?: string;
+  locationLat?: number | null;
+  locationLng?: number | null;
 }
 
 export interface ChatMessage {

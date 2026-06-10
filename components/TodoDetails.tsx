@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ArrowRight, Trash2, CheckCircle2, Circle, Flag, Calendar, Clock, AlignLeft, ListChecks, Plus, X } from 'lucide-react';
+import { ArrowRight, Trash2, CheckCircle2, Circle, Flag, Calendar, Clock, AlignLeft, ListChecks, Plus, X, MapPin } from 'lucide-react';
 import { Step, Todo, TodoWithPlan } from '@/types';
 import { generateId } from '@/lib/utils';
 import ConfirmModal from '@/components/ConfirmModal';
+import LocationPicker from '@/components/LocationPicker';
 
 interface TodoDetailsProps {
   todo: TodoWithPlan | undefined;
@@ -243,6 +244,21 @@ export default function TodoDetails({ todo, onClose, onToggle, onDelete, onUpdat
               )}
             </div>
           </div>
+        </div>
+
+        {/* Location */}
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
+            <MapPin className="w-4 h-4" /> Location
+          </label>
+          <LocationPicker
+            value={{
+              location: renderTodo.location ?? '',
+              locationLat: renderTodo.locationLat ?? null,
+              locationLng: renderTodo.locationLng ?? null,
+            }}
+            onChange={(v) => onUpdate(v)}
+          />
         </div>
 
         <hr className="border-gray-100" />

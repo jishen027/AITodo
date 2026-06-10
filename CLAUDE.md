@@ -23,6 +23,9 @@ DATABASE_URL=postgresql://user:password@host:5432/ai_todo
 
 AUTH_SECRET=<random base64 string>  # node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 NEXTAUTH_URL=http://localhost:3000
+
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=...  # optional — enables map + place autocomplete in TodoDetails
+                                     # (Maps JavaScript API, Places API (New), Geocoding API)
 ```
 
 ## Architecture
@@ -46,7 +49,7 @@ middleware.ts                ← protects all page routes, redirects unauthentic
 
 ### Key types
 
-- **`Todo`** — `{ id, text, completed, notes, dueDate, dueTime, priority, steps[] }`
+- **`Todo`** — `{ id, text, completed, notes, dueDate, dueTime, priority, steps[], location?, locationLat?, locationLng? }`
 - **`Plan`** — `{ id, title, todos[], chat[] }` — one plan owns one chat thread
 - **`TodoWithPlan`** — `Todo` extended with `planId` / `planTitle` for cross-plan views
 
@@ -112,5 +115,6 @@ All plan/todo/chat routes check `auth()` and return 401 if unauthenticated.
 - **`Sidebar`** — plan list + navigation; user initials + sign-out button in footer
 - **`TodoList`** — active/completed todo columns for the selected plan; GSAP entry animation for AI-created todos
 - **`ChatPanel`** — chat UI for the active plan; slides in/out relative to `TodoDetails`
-- **`TodoDetails`** — slide-over panel for editing a single todo (title, priority, due date/time, steps, notes)
+- **`TodoDetails`** — slide-over panel for editing a single todo (title, priority, due date/time, location, steps, notes)
+- **`LocationPicker`** — location field inside `TodoDetails`: Places autocomplete + embedded Google Map (`@vis.gl/react-google-maps`); lazily geocodes plain-text locations (e.g. set by the AI), click-to-move pin with reverse geocoding; falls back to a plain text input when `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unset. AI-emitted coordinates are never trusted — `parsePlanUpdate` resets coords whenever the location text changes.
 - **`CalendarView`** — monthly grid + all-tasks list; todos sorted by `dueDate + dueTime` within each day
