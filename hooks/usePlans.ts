@@ -231,7 +231,7 @@ export function usePlans() {
   const createPlan = () => {
     const newPlan: Plan = {
       id: generateId(),
-      title: '新建计划',
+      title: 'New Plan',
       todos: [],
       chat: [{ role: 'ai', text: "New plan created! Tell me your goal and I'll break it down using the SMART framework." }],
     };
