@@ -54,7 +54,7 @@ export default function Home() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-400">
+      <div className="flex h-screen supports-[height:100dvh]:h-dvh items-center justify-center bg-gray-50 text-gray-400">
         <div className="text-center">
           <div className="w-8 h-8 border-4 border-indigo-300 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm">Loading plans…</p>
@@ -65,7 +65,7 @@ export default function Home() {
 
   if (!activePlanId && plans.length === 0) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-500">
+      <div className="flex h-screen supports-[height:100dvh]:h-dvh items-center justify-center bg-gray-50 text-gray-500">
         <div className="text-center">
           <ListTodo className="w-16 h-16 mx-auto mb-4 text-gray-300" />
           <p className="text-lg">No plans yet. Create one to get started.</p>
@@ -94,7 +94,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen bg-white font-sans overflow-hidden">
+    <div className="flex h-screen supports-[height:100dvh]:h-dvh bg-white font-sans overflow-hidden">
       {/* Mobile overlay */}
       {isSidebarOpen && (
         <div
