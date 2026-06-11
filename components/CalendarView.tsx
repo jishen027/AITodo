@@ -155,7 +155,7 @@ export default function CalendarView({
                       <div
                         key={todo.id}
                         onClick={() => onSelectTodo(todo.id)}
-                        className={`text-xs p-1 rounded truncate cursor-pointer transition-colors ${
+                        className={`shrink-0 text-xs p-1 rounded truncate cursor-pointer transition-colors ${
                           todo.completed
                             ? 'bg-gray-100 text-gray-400 line-through'
                             : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
