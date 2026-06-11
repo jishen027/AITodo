@@ -1,3 +1,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* iOS Safari auto-zooms the page when a focused form field's font size is
+   below 16px. Force 16px on touch devices (overriding utilities like
+   text-sm) so focusing an input never triggers the zoom. */
+@media (hover: none) and (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
