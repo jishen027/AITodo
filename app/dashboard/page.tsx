@@ -194,17 +194,11 @@ export default function Home() {
                 onInputChange={setInputMessage}
                 onSend={handleSendMessage}
               />
-              {/* Frosted-glass overlay — fades in when TodoDetails is open */}
-              <div
-                className={`absolute inset-0 z-10 bg-white/40 backdrop-blur-sm pointer-events-none transition-opacity duration-300 ${
-                  selectedTodoId ? 'opacity-100' : 'opacity-0'
-                }`}
-              />
             </section>
           </>
         ) : null}
 
-        {/* Global slide-over details panel */}
+        {/* Global details drawer (vaul) — right-side on desktop, bottom sheet on mobile */}
         <TodoDetails
           todo={selectedTodo}
           onClose={() => setSelectedTodoId(null)}

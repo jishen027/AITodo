@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
+import { Drawer } from 'vaul';
 import { ArrowRight, Trash2, CheckCircle2, Circle, Flag, Calendar, Clock, AlignLeft, ListChecks, Plus, X, MapPin } from 'lucide-react';
 import { Step, Todo, TodoWithPlan } from '@/types';
 import { generateId } from '@/lib/utils';
@@ -27,6 +28,22 @@ const priorityButtonClass = (selected: boolean, p: string) => {
 
 const priorityLabel = (p: string) =>
   p === 'none' ? 'None' : p.charAt(0).toUpperCase() + p.slice(1);
+
+// Drawer direction: right-side panel on md+ (matches the old slide-over),
+// bottom sheet with drag handle on mobile (canonical shadcn Drawer).
+const DESKTOP_QUERY = '(min-width: 768px)';
+
+function useIsDesktop() {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mql = window.matchMedia(DESKTOP_QUERY);
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    },
+    () => window.matchMedia(DESKTOP_QUERY).matches,
+    () => false,
+  );
+}
 
 function StepItem({
   step,
@@ -89,43 +106,18 @@ function StepItem({
 export default function TodoDetails({ todo, onClose, onToggle, onDelete, onUpdate }: TodoDetailsProps) {
   const [newStepText, setNewStepText] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  // isOpen drives the CSS transition; renderTodo holds the last known todo so content
-  // stays visible during the close animation and is cleared once the section unmounts.
-  const [isOpen, setIsOpen] = useState(false);
+  const isDesktop = useIsDesktop();
+
+  // renderTodo holds the last known todo so content stays visible while
+  // vaul plays the close animation (todo is already undefined by then).
   const [renderTodo, setRenderTodo] = useState<TodoWithPlan | undefined>(undefined);
 
   useEffect(() => {
-    if (todo) {
-      setRenderTodo(todo);
-      // Two RAFs are required: the first lets React commit the closed-position
-      // render to the DOM; the second fires after the browser has painted that
-      // frame, giving the CSS transition a visual starting point to animate from.
-      let raf2 = 0;
-      const raf1 = requestAnimationFrame(() => {
-        raf2 = requestAnimationFrame(() => setIsOpen(true));
-      });
-      return () => {
-        cancelAnimationFrame(raf1);
-        cancelAnimationFrame(raf2);
-      };
-    } else {
-      setIsOpen(false);
-      // renderTodo is cleared by onTransitionEnd once the exit animation finishes,
-      // so content stays visible while the panel slides away.
-    }
+    if (todo) setRenderTodo(todo);
   }, [todo]);
 
-  const handleTransitionEnd = (e: React.TransitionEvent) => {
-    // Only act on the transform transition (fires once vs. once per property)
-    if (e.propertyName === 'transform' && !todo) {
-      setRenderTodo(undefined);
-    }
-  };
-
-  // Nothing in the DOM when fully closed — no compositing layer, no shadow bleed.
-  if (!renderTodo) return null;
-
-  const steps = renderTodo.steps ?? [];
+  const open = !!todo;
+  const steps = renderTodo?.steps ?? [];
   const doneCount = steps.filter((s) => s.completed).length;
 
   const addStep = () => {
@@ -145,204 +137,229 @@ export default function TodoDetails({ todo, onClose, onToggle, onDelete, onUpdat
     onUpdate({ steps: steps.map((s) => (s.id === id ? { ...s, text } : s)) });
 
   return (
-    <section
-      onTransitionEnd={handleTransitionEnd}
-      className={`
-        absolute inset-y-0 right-0 w-full md:w-[45%] lg:w-[40%] bg-white
-        shadow-2xl md:shadow-[-8px_0_24px_rgba(0,0,0,0.08)]
-        border-l border-gray-100 transition-[transform,opacity] duration-300 ease-in-out z-50 flex flex-col
-        ${isOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0 pointer-events-none'}
-      `}
+    <Drawer.Root
+      open={open}
+      onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}
+      direction={isDesktop ? 'right' : 'bottom'}
+      onAnimationEnd={(isOpen) => { if (!isOpen) setRenderTodo(undefined); }}
     >
-      {/* Header */}
-      <div className="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
-        <button
-          onClick={onClose}
-          className="flex items-center gap-1 text-sm font-medium text-gray-500 hover:text-indigo-600 transition"
+      <Drawer.Portal>
+        <Drawer.Overlay className="fixed inset-0 z-50 bg-black/40" />
+        <Drawer.Content
+          onEscapeKeyDown={(e) => { if (showDeleteConfirm) e.preventDefault(); }}
+          className={
+            isDesktop
+              ? 'fixed inset-y-0 right-0 z-50 flex h-full w-[45%] lg:w-[40%] flex-col bg-white border-l border-gray-100 shadow-[-8px_0_24px_rgba(0,0,0,0.08)] outline-none'
+              : 'fixed inset-x-0 bottom-0 z-50 flex h-[94%] flex-col rounded-t-[10px] bg-white shadow-2xl outline-none'
+          }
         >
-          <ArrowRight className="w-4 h-4 rotate-180" />
-          Close
-        </button>
-        <div className="flex items-center gap-2">
-          <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded truncate max-w-[150px]">
-            Plan: {renderTodo.planTitle}
-          </span>
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+          <Drawer.Title className="sr-only">Task details</Drawer.Title>
+          <Drawer.Description className="sr-only">
+            Edit the selected task’s title, priority, due date, location, steps and notes.
+          </Drawer.Description>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Title */}
-        <div className="flex items-start gap-4">
-          <button
-            onClick={(e) => onToggle(renderTodo.id, e)}
-            className={`mt-1 flex-shrink-0 transition-colors ${renderTodo.completed ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
-          >
-            {renderTodo.completed ? <CheckCircle2 className="w-6 h-6" /> : <Circle className="w-6 h-6" />}
-          </button>
-          <textarea
-            value={renderTodo.text}
-            onChange={(e) => onUpdate({ text: e.target.value })}
-            className={`w-full text-xl font-bold bg-transparent border-none focus:ring-0 resize-none overflow-hidden transition-colors ${renderTodo.completed ? 'text-gray-400 line-through' : 'text-gray-800'}`}
-            rows={2}
-            placeholder="Task title"
-          />
-        </div>
-
-        <hr className="border-gray-100" />
-
-        {/* Priority */}
-        <div className="space-y-2">
-          <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
-            <Flag className="w-4 h-4" /> Priority
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {PRIORITIES.map((p) => (
-              <button
-                key={p}
-                onClick={() => onUpdate({ priority: p })}
-                className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${priorityButtonClass(renderTodo.priority === p, p)}`}
-              >
-                {priorityLabel(p)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Due Date & Time */}
-        <div className="space-y-2">
-          <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
-            <Calendar className="w-4 h-4" /> Due Date & Time
-          </label>
-          <div className="flex items-center gap-3 flex-wrap">
-            <input
-              type="date"
-              value={renderTodo.dueDate || ''}
-              onChange={(e) => onUpdate({ dueDate: e.target.value })}
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-            />
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-gray-400 shrink-0" />
-              <input
-                type="time"
-                value={renderTodo.dueTime || ''}
-                onChange={(e) => onUpdate({ dueTime: e.target.value })}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-              />
-              {renderTodo.dueTime && (
-                <button
-                  onClick={() => onUpdate({ dueTime: '' })}
-                  className="p-1 text-gray-400 hover:text-red-400 transition"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Location */}
-        <div className="space-y-2">
-          <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
-            <MapPin className="w-4 h-4" /> Location
-          </label>
-          <LocationPicker
-            value={{
-              location: renderTodo.location ?? '',
-              locationLat: renderTodo.locationLat ?? null,
-              locationLng: renderTodo.locationLng ?? null,
-            }}
-            onChange={(v) => onUpdate(v)}
-          />
-        </div>
-
-        <hr className="border-gray-100" />
-
-        {/* Steps */}
-        <div className="space-y-2">
-          <label className="text-xs font-semibold text-gray-500 uppercase flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <ListChecks className="w-4 h-4" /> Steps
-            </span>
-            {steps.length > 0 && (
-              <span className="text-xs font-normal text-gray-400 normal-case">
-                {doneCount} / {steps.length} done
-              </span>
-            )}
-          </label>
-
-          {steps.length > 0 && (
-            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                style={{ width: `${(doneCount / steps.length) * 100}%` }}
-              />
-            </div>
+          {/* Drag handle — bottom sheet only */}
+          {!isDesktop && (
+            <div className="mx-auto mt-3 h-1.5 w-12 shrink-0 rounded-full bg-gray-300" />
           )}
 
-          <div className="space-y-0.5">
-            {steps.map((step) => (
-              <StepItem
-                key={step.id}
-                step={step}
-                onToggle={() => toggleStep(step.id)}
-                onDelete={() => deleteStep(step.id)}
-                onEdit={(text) => editStep(step.id, text)}
-              />
-            ))}
-          </div>
+          {renderTodo && (
+            <>
+              {/* Header */}
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+                <button
+                  onClick={onClose}
+                  className="flex items-center gap-1 text-sm font-medium text-gray-500 hover:text-indigo-600 transition"
+                >
+                  <ArrowRight className={`w-4 h-4 ${isDesktop ? 'rotate-180' : 'rotate-90'}`} />
+                  Close
+                </button>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded truncate max-w-[150px]">
+                    Plan: {renderTodo.planTitle}
+                  </span>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
 
-          <div className="flex items-center gap-2 pt-1">
-            <Plus className="w-4 h-4 text-gray-400 flex-shrink-0" />
-            <input
-              type="text"
-              value={newStepText}
-              onChange={(e) => setNewStepText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') addStep(); }}
-              placeholder="Add a step..."
-              className="flex-1 text-sm text-gray-700 placeholder-gray-400 bg-transparent border-b border-dashed border-gray-200 focus:outline-none focus:border-indigo-400 py-1 transition-colors"
-            />
-            {newStepText.trim() && (
-              <button onClick={addStep} className="text-indigo-500 hover:text-indigo-700 transition">
-                <Plus className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        </div>
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Title */}
+                <div className="flex items-start gap-4">
+                  <button
+                    onClick={(e) => onToggle(renderTodo.id, e)}
+                    className={`mt-1 flex-shrink-0 transition-colors ${renderTodo.completed ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
+                  >
+                    {renderTodo.completed ? <CheckCircle2 className="w-6 h-6" /> : <Circle className="w-6 h-6" />}
+                  </button>
+                  <textarea
+                    value={renderTodo.text}
+                    onChange={(e) => onUpdate({ text: e.target.value })}
+                    className={`w-full text-xl font-bold bg-transparent border-none focus:ring-0 resize-none overflow-hidden transition-colors ${renderTodo.completed ? 'text-gray-400 line-through' : 'text-gray-800'}`}
+                    rows={2}
+                    placeholder="Task title"
+                  />
+                </div>
 
-        <hr className="border-gray-100" />
+                <hr className="border-gray-100" />
 
-        {/* Notes */}
-        <div className="space-y-2 flex-1 flex flex-col">
-          <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
-            <AlignLeft className="w-4 h-4" /> Notes & Details
-          </label>
-          <textarea
-            value={renderTodo.notes || ''}
-            onChange={(e) => onUpdate({ notes: e.target.value })}
-            placeholder="Add a detailed description, sub-steps, or notes..."
-            className="w-full flex-1 min-h-[150px] p-3 bg-gray-50 border border-gray-100 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all resize-y"
-          />
-        </div>
-      </div>
+                {/* Priority */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
+                    <Flag className="w-4 h-4" /> Priority
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {PRIORITIES.map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => onUpdate({ priority: p })}
+                        className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${priorityButtonClass(renderTodo.priority === p, p)}`}
+                      >
+                        {priorityLabel(p)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-      {/* Delete confirmation modal */}
-      {showDeleteConfirm && (
-        <ConfirmModal
-          title="Delete task?"
-          message={`"${renderTodo.text}" will be permanently removed.`}
-          onConfirm={() => {
-            setShowDeleteConfirm(false);
-            onDelete(renderTodo.id);
-          }}
-          onCancel={() => setShowDeleteConfirm(false)}
-        />
-      )}
-    </section>
+                {/* Due Date & Time */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
+                    <Calendar className="w-4 h-4" /> Due Date & Time
+                  </label>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <input
+                      type="date"
+                      value={renderTodo.dueDate || ''}
+                      onChange={(e) => onUpdate({ dueDate: e.target.value })}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                    />
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-gray-400 shrink-0" />
+                      <input
+                        type="time"
+                        value={renderTodo.dueTime || ''}
+                        onChange={(e) => onUpdate({ dueTime: e.target.value })}
+                        className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                      />
+                      {renderTodo.dueTime && (
+                        <button
+                          onClick={() => onUpdate({ dueTime: '' })}
+                          className="p-1 text-gray-400 hover:text-red-400 transition"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Location */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
+                    <MapPin className="w-4 h-4" /> Location
+                  </label>
+                  <LocationPicker
+                    value={{
+                      location: renderTodo.location ?? '',
+                      locationLat: renderTodo.locationLat ?? null,
+                      locationLng: renderTodo.locationLng ?? null,
+                    }}
+                    onChange={(v) => onUpdate(v)}
+                  />
+                </div>
+
+                <hr className="border-gray-100" />
+
+                {/* Steps */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-500 uppercase flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <ListChecks className="w-4 h-4" /> Steps
+                    </span>
+                    {steps.length > 0 && (
+                      <span className="text-xs font-normal text-gray-400 normal-case">
+                        {doneCount} / {steps.length} done
+                      </span>
+                    )}
+                  </label>
+
+                  {steps.length > 0 && (
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                        style={{ width: `${(doneCount / steps.length) * 100}%` }}
+                      />
+                    </div>
+                  )}
+
+                  <div className="space-y-0.5">
+                    {steps.map((step) => (
+                      <StepItem
+                        key={step.id}
+                        step={step}
+                        onToggle={() => toggleStep(step.id)}
+                        onDelete={() => deleteStep(step.id)}
+                        onEdit={(text) => editStep(step.id, text)}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <Plus className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      type="text"
+                      value={newStepText}
+                      onChange={(e) => setNewStepText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') addStep(); }}
+                      placeholder="Add a step..."
+                      className="flex-1 text-sm text-gray-700 placeholder-gray-400 bg-transparent border-b border-dashed border-gray-200 focus:outline-none focus:border-indigo-400 py-1 transition-colors"
+                    />
+                    {newStepText.trim() && (
+                      <button onClick={addStep} className="text-indigo-500 hover:text-indigo-700 transition">
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <hr className="border-gray-100" />
+
+                {/* Notes */}
+                <div className="space-y-2 flex-1 flex flex-col">
+                  <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-2">
+                    <AlignLeft className="w-4 h-4" /> Notes & Details
+                  </label>
+                  <textarea
+                    value={renderTodo.notes || ''}
+                    onChange={(e) => onUpdate({ notes: e.target.value })}
+                    placeholder="Add a detailed description, sub-steps, or notes..."
+                    className="w-full flex-1 min-h-[150px] p-3 bg-gray-50 border border-gray-100 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all resize-y"
+                  />
+                </div>
+              </div>
+
+              {/* Delete confirmation — rendered inside Drawer.Content so the drawer's
+                  focus trap and outside-click dismissal don't fight it; the transformed
+                  drawer is its containing block, so it overlays the drawer panel. */}
+              {showDeleteConfirm && (
+                <ConfirmModal
+                  title="Delete task?"
+                  message={`"${renderTodo.text}" will be permanently removed.`}
+                  onConfirm={() => {
+                    setShowDeleteConfirm(false);
+                    onDelete(renderTodo.id);
+                  }}
+                  onCancel={() => setShowDeleteConfirm(false)}
+                />
+              )}
+            </>
+          )}
+        </Drawer.Content>
+      </Drawer.Portal>
+    </Drawer.Root>
   );
 }
