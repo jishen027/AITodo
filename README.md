@@ -6,7 +6,7 @@ An AI-powered task planning app built with Next.js. Chat with an AI agent to bre
 
 ## Features
 
-- **AI planning assistant** — describe a goal and the AI proposes a structured plan with tasks, priorities, due dates, and times
+- **AI planning assistant** — describe a goal and the AI proposes a structured plan with tasks, priorities, due dates, times, and locations
 - **Iterative chat** — each plan has its own persistent chat thread; continue the conversation to add, edit, reschedule, or remove tasks
 - **Task details** — per-task notes, sub-steps with progress tracking, priority flags, due date + time, location
 - **Task locations** — attach a place to a task via Google Places autocomplete with an embedded map and click-to-move pin (falls back to plain text without an API key)
