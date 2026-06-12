@@ -4,7 +4,10 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# npm < 11.17 on dev machines prunes other platforms' optional deps (e.g.
+# @emnapi/* needed by @img/sharp-wasm32) from the lockfile, which makes the
+# strict `npm ci` fail. If that happens, repair the lockfile in-place and retry.
+RUN npm ci || (npm install --package-lock-only && npm ci)
 
 # ── Stage 2: build ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
