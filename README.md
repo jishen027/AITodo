@@ -8,11 +8,13 @@ An AI-powered task planning app built with Next.js. Chat with an AI agent to bre
 
 - **AI planning assistant** — describe a goal and the AI proposes a structured plan with tasks, priorities, due dates, and times
 - **Iterative chat** — each plan has its own persistent chat thread; continue the conversation to add, edit, reschedule, or remove tasks
-- **Task details** — per-task notes, sub-steps with progress tracking, priority flags, due date + time
+- **Task details** — per-task notes, sub-steps with progress tracking, priority flags, due date + time, location
+- **Task locations** — attach a place to a task via Google Places autocomplete with an embedded map and click-to-move pin (falls back to plain text without an API key)
 - **Calendar view** — monthly grid showing all tasks across plans, sorted by time within each day
+- **Task map** — every located task plotted on a Google Map below the calendar, pins colored by priority; the view auto-fits around incomplete tasks
 - **Completed tasks are locked** — tasks you check off are never modified by the AI
 - **Persistent storage** — all plans, tasks, and chat history are saved in PostgreSQL
-- **User authentication** — each user has their own private plans; login and registration via NextAuth
+- **User authentication** — each user has their own private plans; email/password registration or Google sign-in via NextAuth
 
 ## Getting Started
 
@@ -42,6 +44,17 @@ DATABASE_URL=postgresql://user:password@host:5432/ai_todo
 # node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 AUTH_SECRET=your_random_secret_here
 NEXTAUTH_URL=http://localhost:3000
+
+# Google OAuth — create at https://console.cloud.google.com/apis/credentials
+# Authorized redirect URI: http://localhost:3000/api/auth/callback/google
+AUTH_GOOGLE_ID=your_google_client_id_here
+AUTH_GOOGLE_SECRET=your_google_client_secret_here
+
+# Google Maps (optional) — create an API key at
+# https://console.cloud.google.com/google/maps-apis/credentials
+# Enable: Maps JavaScript API, Places API (New), Geocoding API
+# Without it, todo locations fall back to plain text (no map / autocomplete)
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
 ```
 
 ### 3. Run the development server
@@ -54,12 +67,12 @@ Open [http://localhost:3000](http://localhost:3000). The database tables are cre
 
 ## Usage
 
-1. **Register** — create an account on the `/register` page; you are signed in automatically
+1. **Register** — create an account on the `/register` page (or sign in with Google); you are signed in automatically
 2. **Create a plan** — click **New Plan** in the sidebar
 3. **Chat with the AI** — describe your goal in the chat panel; the AI will ask clarifying questions, propose a plan for review, then create the tasks once you confirm
-4. **Edit tasks manually** — click any task to open the details panel and edit the title, priority, due date/time, steps, or notes
+4. **Edit tasks manually** — click any task to open the details panel and edit the title, priority, due date/time, location, steps, or notes
 5. **Update via chat** — send follow-up messages in the same chat to add, remove, or reschedule tasks; the AI will update only the incomplete ones
-6. **Calendar** — switch to the Calendar view from the sidebar to see all tasks across plans on a monthly grid
+6. **Calendar** — switch to the Calendar view from the sidebar to see all tasks across plans on a monthly grid, with located tasks plotted on a map below
 7. **Sign out** — click the arrow icon next to your name in the sidebar footer
 
 ## Tech Stack
@@ -67,10 +80,12 @@ Open [http://localhost:3000](http://localhost:3000). The database tables are cre
 - **Next.js 15** with App Router and TypeScript
 - **React 19**
 - **Tailwind CSS**
-- **NextAuth v5** (Auth.js) for authentication with JWT sessions
+- **NextAuth v5** (Auth.js) for authentication with JWT sessions — Credentials + Google providers
 - **PostgreSQL** via the `pg` driver for persistent storage
 - **bcryptjs** for password hashing
 - **DeepSeek API** (via the `openai` npm package with a custom `baseURL`)
+- **@vis.gl/react-google-maps** for the location picker and task map
+- **vaul** for the task details drawer (bottom sheet on mobile)
 - **GSAP** for task entry animations
 - **react-markdown** + **remark-gfm** for rendering AI responses
 
@@ -96,13 +111,16 @@ app/
       [id]/chat/route.ts          # POST append chat messages
 auth.config.ts                    # Edge-compatible NextAuth config (middleware)
 auth.ts                           # full NextAuth config with Credentials provider
-middleware.ts                     # route protection — redirects to /login
+middleware.ts                     # route protection — logged-out → /login, logged-in → /dashboard
 components/
   Sidebar.tsx                     # plan navigation + user info + sign out
   TodoList.tsx                    # task list for the active plan
   ChatPanel.tsx                   # AI chat interface
-  TodoDetails.tsx                 # slide-over task editor
+  TodoDetails.tsx                 # task editor drawer (side panel / mobile bottom sheet)
+  LocationPicker.tsx              # Places autocomplete + map inside TodoDetails
   CalendarView.tsx                # monthly calendar + all-tasks list
+  TodoMap.tsx                     # map of all located tasks, pins colored by priority
+  ConfirmModal.tsx                # confirmation dialog for destructive actions
 hooks/
   usePlans.ts                     # all state, AI agent logic, and DB persistence
 lib/
@@ -118,9 +136,10 @@ types/
 Tables are created automatically via `CREATE TABLE IF NOT EXISTS` on the first server request.
 
 ```
-users          id, name, email, password, created_at
+users          id, name, email, password (null for Google users), created_at
 plans          id, title, user_id → users, created_at
-todos          id, plan_id → plans, text, completed, notes, due_date, due_time, priority, sort_order
+todos          id, plan_id → plans, text, completed, notes, due_date, due_time, priority,
+               location, location_lat, location_lng, sort_order
 steps          id, todo_id → todos, text, completed, sort_order
 chat_messages  id, plan_id → plans, role, text, created_at
 ```
@@ -138,6 +157,9 @@ The app is containerised and deployed via GitHub Actions to a self-hosted runner
 | `DATABASE_URL` | PostgreSQL connection string |
 | `AUTH_SECRET` | Random base64 string for NextAuth session signing |
 | `NEXTAUTH_URL` | Public URL of the app (e.g. `https://todo.promptnotfound.com`) |
+| `AUTH_GOOGLE_ID` | Google OAuth client ID |
+| `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Google Maps API key (passed as a Docker build arg — it is inlined into the client bundle at build time) |
 
 ### Docker
 

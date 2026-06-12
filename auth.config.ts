@@ -19,7 +19,7 @@ export const authConfig: NextAuthConfig = {
       if (pathname.startsWith('/api')) return true;
 
       if (!isLoggedIn && !isAuthPage && !isPublicPage) return false;
-      if (isLoggedIn && isAuthPage) {
+      if (isLoggedIn && (isAuthPage || isPublicPage)) {
         return Response.redirect(new URL('/dashboard', request.nextUrl));
       }
       return true;
