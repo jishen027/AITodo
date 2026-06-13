@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
 import { pool, ensureReady } from '@/lib/db';
-import { auth } from '@/auth';
+import { resolveUserId } from '@/lib/mobileAuth';
 import type { Todo } from '@/types';
 
-async function isOwner(planId: string) {
-  const session = await auth();
-  const userId = session?.user?.id;
+async function isOwner(planId: string, req: Request) {
+  const userId = await resolveUserId(req);
   if (!userId) return false;
   const { rows } = await pool.query('SELECT id FROM plans WHERE id = $1 AND user_id = $2', [planId, userId]);
   return rows.length > 0;
@@ -18,7 +17,7 @@ export async function PUT(
 ) {
   await ensureReady();
   const { id: planId } = await params;
-  if (!(await isOwner(planId))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!(await isOwner(planId, request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { todos } = (await request.json()) as { todos: Todo[] };
 
   const client = await pool.connect();

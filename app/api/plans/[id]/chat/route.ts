@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { pool, ensureReady } from '@/lib/db';
-import { auth } from '@/auth';
+import { resolveUserId } from '@/lib/mobileAuth';
 import type { ChatMessage } from '@/types';
 
 export async function POST(
@@ -8,8 +8,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   await ensureReady();
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const userId = await resolveUserId(request);
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { id: planId } = await params;
   const body = (await request.json()) as ChatMessage | ChatMessage[];
   const messages = Array.isArray(body) ? body : [body];

@@ -1,16 +1,11 @@
 import { NextResponse } from 'next/server';
 import { pool, ensureReady } from '@/lib/db';
-import { auth } from '@/auth';
+import { resolveUserId } from '@/lib/mobileAuth';
 import type { Plan, Todo, Step, ChatMessage } from '@/types';
 
-async function getUserId() {
-  const session = await auth();
-  return session?.user?.id ?? null;
-}
-
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const userId = await getUserId();
+    const userId = await resolveUserId(request);
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     await ensureReady();
@@ -88,7 +83,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const userId = await getUserId();
+  const userId = await resolveUserId(request);
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureReady();

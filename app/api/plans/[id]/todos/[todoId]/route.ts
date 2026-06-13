@@ -1,19 +1,14 @@
 import { NextResponse } from 'next/server';
 import { pool, ensureReady } from '@/lib/db';
-import { auth } from '@/auth';
+import { resolveUserId } from '@/lib/mobileAuth';
 import type { Todo } from '@/types';
-
-async function getAuthUserId() {
-  const session = await auth();
-  return session?.user?.id ?? null;
-}
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; todoId: string }> }
 ) {
   await ensureReady();
-  const userId = await getAuthUserId();
+  const userId = await resolveUserId(request);
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { todoId } = await params;
   const updates = (await request.json()) as Partial<Todo>;
@@ -64,11 +59,11 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ todoId: string }> }
 ) {
   await ensureReady();
-  const userId = await getAuthUserId();
+  const userId = await resolveUserId(request);
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { todoId } = await params;
   await pool.query('DELETE FROM todos WHERE id = $1', [todoId]);

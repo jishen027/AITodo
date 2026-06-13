@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
 import { pool, ensureReady } from '@/lib/db';
-import { auth } from '@/auth';
+import { resolveUserId } from '@/lib/mobileAuth';
 
-async function verifyOwnership(planId: string): Promise<string | null> {
-  const session = await auth();
-  const userId = session?.user?.id;
+async function verifyOwnership(planId: string, req: Request): Promise<string | null> {
+  const userId = await resolveUserId(req);
   if (!userId) return null;
   const { rows } = await pool.query(
     'SELECT id FROM plans WHERE id = $1 AND user_id = $2',
@@ -19,7 +18,7 @@ export async function PUT(
 ) {
   await ensureReady();
   const { id } = await params;
-  const owner = await verifyOwnership(id);
+  const owner = await verifyOwnership(id, request);
   if (!owner) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { title } = await request.json();
@@ -28,12 +27,12 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   await ensureReady();
   const { id } = await params;
-  const owner = await verifyOwnership(id);
+  const owner = await verifyOwnership(id, request);
   if (!owner) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await pool.query('DELETE FROM plans WHERE id = $1', [id]);
