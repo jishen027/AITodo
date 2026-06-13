@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useSyncExternalStore } from 'react';
 import { Drawer } from 'vaul';
-import { ArrowRight, Trash2, CheckCircle2, Circle, Flag, Calendar, Clock, AlignLeft, ListChecks, Plus, X, MapPin } from 'lucide-react';
+import { ArrowRight, Trash2, CheckCircle2, Circle, Flag, Calendar, Clock, AlignLeft, ListChecks, Plus, X, MapPin, Sun } from 'lucide-react';
 import { Step, Todo, TodoWithPlan } from '@/types';
 import { generateId } from '@/lib/utils';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -175,7 +175,19 @@ export default function TodoDetails({ todo, onClose, onToggle, onDelete, onUpdat
                   Close
                 </button>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded truncate max-w-[150px]">
+                  <button
+                    onClick={() => onUpdate({ myDay: !renderTodo.myDay })}
+                    title={renderTodo.myDay ? 'Remove from My Day' : 'Add to My Day'}
+                    className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-md border transition ${
+                      renderTodo.myDay
+                        ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                        : 'bg-white border-gray-200 text-gray-500 hover:text-amber-600 hover:border-amber-200'
+                    }`}
+                  >
+                    <Sun className="w-4 h-4" />
+                    {renderTodo.myDay ? 'In My Day' : 'Add to My Day'}
+                  </button>
+                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded truncate max-w-[120px]">
                     Plan: {renderTodo.planTitle}
                   </span>
                   <button

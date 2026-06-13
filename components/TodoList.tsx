@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { gsap } from 'gsap';
-import { Plus, Circle, CheckCircle2, Trash2, Flag, Calendar, AlignLeft, Edit2, ListChecks, Bot, Sparkles } from 'lucide-react';
+import { Plus, Circle, CheckCircle2, Trash2, Flag, Calendar, AlignLeft, Edit2, ListChecks, Bot, Sparkles, Sun } from 'lucide-react';
 import { Plan, Todo } from '@/types';
 import { getPriorityColor } from '@/lib/utils';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -20,6 +20,7 @@ interface TodoListProps {
   onAnimationDone: () => void;
   onSelectTodo: (id: string) => void;
   onToggleTodo: (id: string, e?: React.MouseEvent) => void;
+  onToggleMyDay: (id: string, e?: React.MouseEvent) => void;
   onDeleteTodo: (id: string, e?: React.MouseEvent) => void;
   onAddTodo: (e: React.KeyboardEvent) => void;
   onNewTaskTextChange: (text: string) => void;
@@ -41,6 +42,7 @@ export default function TodoList({
   onAnimationDone,
   onSelectTodo,
   onToggleTodo,
+  onToggleMyDay,
   onDeleteTodo,
   onAddTodo,
   onNewTaskTextChange,
@@ -276,6 +278,17 @@ export default function TodoList({
                   </>
                 )}
               </div>
+              <button
+                onClick={(e) => onToggleMyDay(todo.id, e)}
+                title={todo.myDay ? 'Remove from My Day' : 'Add to My Day'}
+                className={`p-2 transition ${
+                  todo.myDay
+                    ? 'text-amber-400 hover:text-amber-600'
+                    : 'text-gray-400 hover:text-amber-500 md:opacity-0 md:group-hover:opacity-100'
+                }`}
+              >
+                <Sun className="w-4 h-4" />
+              </button>
               <button
                 onClick={(e) => handleDelete(todo.id, e)}
                 className="md:opacity-0 md:group-hover:opacity-100 text-gray-400 hover:text-red-500 p-2 transition"

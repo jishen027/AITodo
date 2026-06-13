@@ -35,6 +35,7 @@ export async function PATCH(
     if (updates.location !== undefined)  { fields.push(`location = $${idx++}`);  values.push(updates.location); }
     if (updates.locationLat !== undefined) { fields.push(`location_lat = $${idx++}`); values.push(updates.locationLat); }
     if (updates.locationLng !== undefined) { fields.push(`location_lng = $${idx++}`); values.push(updates.locationLng); }
+    if (updates.myDay !== undefined)     { fields.push(`my_day = $${idx++}`);     values.push(updates.myDay); }
 
     if (fields.length > 0) {
       values.push(todoId);

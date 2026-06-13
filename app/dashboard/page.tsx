@@ -7,9 +7,10 @@ import TodoList from '@/components/TodoList';
 import ChatPanel from '@/components/ChatPanel';
 import TodoDetails from '@/components/TodoDetails';
 import CalendarView from '@/components/CalendarView';
+import MyDayView from '@/components/MyDayView';
 import { usePlans } from '@/hooks/usePlans';
 
-type View = 'plans' | 'calendar';
+type View = 'myday' | 'plans' | 'calendar';
 
 export default function Home() {
   const {
@@ -21,6 +22,17 @@ export default function Home() {
     completedTodos,
     allTodos,
     sortedAllTodos,
+    myDayTodos,
+    toggleMyDay,
+    addMyDayTodo,
+    myDaySuggestions,
+    dueSoonTodos,
+    recentlyAddedTodos,
+    suggestionsLoading,
+    suggestionsError,
+    suggestionsLoaded,
+    loadSuggestions,
+    dismissSuggestion,
     selectedTodo,
     selectedTodoId,
     setSelectedTodoId,
@@ -48,7 +60,7 @@ export default function Home() {
   } = usePlans();
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [currentView, setCurrentView] = useState<View>('plans');
+  const [currentView, setCurrentView] = useState<View>('myday');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [mobilePlanTab, setMobilePlanTab] = useState<'tasks' | 'chat'>('tasks');
 
@@ -107,6 +119,7 @@ export default function Home() {
         plans={plans}
         activePlanId={activePlanId ?? ''}
         currentView={currentView}
+        myDayCount={myDayTodos.filter((t) => !t.completed).length}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         onSelectPlan={handleSelectPlan}
@@ -122,7 +135,7 @@ export default function Home() {
             <Menu className="w-6 h-6" />
           </button>
           <span className="font-semibold text-gray-800 truncate px-4">
-            {currentView === 'calendar' ? 'Calendar' : activePlan?.title}
+            {currentView === 'calendar' ? 'Calendar' : currentView === 'myday' ? 'My Day' : activePlan?.title}
           </span>
           <div className="w-10" />
         </div>
@@ -155,6 +168,24 @@ export default function Home() {
             onToggleTodo={toggleTodo}
             onSetCurrentDate={setCurrentDate}
           />
+        ) : currentView === 'myday' ? (
+          <MyDayView
+            myDayTodos={myDayTodos}
+            selectedTodoId={selectedTodoId}
+            onSelectTodo={setSelectedTodoId}
+            onToggleTodo={toggleTodo}
+            onRemoveFromMyDay={toggleMyDay}
+            onAddTodo={addMyDayTodo}
+            suggestions={myDaySuggestions}
+            dueSoonTodos={dueSoonTodos}
+            recentlyAddedTodos={recentlyAddedTodos}
+            suggestionsLoading={suggestionsLoading}
+            suggestionsError={suggestionsError}
+            suggestionsLoaded={suggestionsLoaded}
+            onLoadSuggestions={loadSuggestions}
+            onAddToMyDay={toggleMyDay}
+            onDismissSuggestion={dismissSuggestion}
+          />
         ) : activePlan ? (
           <>
             {/* Wrapper uses display:contents so TodoList's flex sizing still applies to main;
@@ -173,6 +204,7 @@ export default function Home() {
                 onAnimationDone={clearAiAddedTodoIds}
                 onSelectTodo={setSelectedTodoId}
                 onToggleTodo={toggleTodo}
+                onToggleMyDay={toggleMyDay}
                 onDeleteTodo={deleteTodo}
                 onAddTodo={addTodoManual}
                 onNewTaskTextChange={setNewTaskText}

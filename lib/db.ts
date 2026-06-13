@@ -34,6 +34,7 @@ async function createSchema() {
       id          VARCHAR(50)  PRIMARY KEY,
       title       TEXT         NOT NULL,
       user_id     VARCHAR(50)  REFERENCES users(id) ON DELETE CASCADE,
+      is_my_day   BOOLEAN      NOT NULL DEFAULT FALSE,
       created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     );
 
@@ -49,6 +50,7 @@ async function createSchema() {
       location     TEXT             NOT NULL DEFAULT '',
       location_lat DOUBLE PRECISION,
       location_lng DOUBLE PRECISION,
+      my_day      BOOLEAN      NOT NULL DEFAULT FALSE,
       sort_order  INTEGER      NOT NULL DEFAULT 0,
       created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     );
@@ -81,5 +83,9 @@ async function createSchema() {
     ALTER TABLE todos ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT '';
     ALTER TABLE todos ADD COLUMN IF NOT EXISTS location_lat DOUBLE PRECISION;
     ALTER TABLE todos ADD COLUMN IF NOT EXISTS location_lng DOUBLE PRECISION;
+  `);
+  await pool.query(`
+    ALTER TABLE todos ADD COLUMN IF NOT EXISTS my_day BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE plans ADD COLUMN IF NOT EXISTS is_my_day BOOLEAN NOT NULL DEFAULT FALSE;
   `);
 }

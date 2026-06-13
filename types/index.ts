@@ -18,6 +18,8 @@ export interface Todo {
   location?: string;
   locationLat?: number | null;
   locationLng?: number | null;
+  myDay?: boolean;
+  createdAt?: string;
 }
 
 export interface ChatMessage {
@@ -30,9 +32,14 @@ export interface Plan {
   title: string;
   todos: Todo[];
   chat: ChatMessage[];
+  isMyDay?: boolean;
 }
 
 export interface TodoWithPlan extends Todo {
   planId: string;
   planTitle: string;
+}
+
+export interface MyDaySuggestion extends TodoWithPlan {
+  reason: string;
 }

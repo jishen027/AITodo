@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { Plan, Todo, TodoWithPlan } from '@/types';
+import { Plan, Todo, TodoWithPlan, MyDaySuggestion } from '@/types';
 import { generateId } from '@/lib/utils';
 import { callChat, callChatStream, type ApiMessage } from '@/lib/api';
 
@@ -148,6 +148,10 @@ function parsePlanUpdate(responseText: string, currentTodos: Todo[]): PlanUpdate
           location,
           locationLat: keepCoords ? existing.locationLat ?? null : null,
           locationLng: keepCoords ? existing.locationLng ?? null : null,
+          // "My Day" is a user-managed flag the AI never sees — always preserve it.
+          myDay: existing?.myDay ?? false,
+          // Preserve original creation time; stamp newly-introduced tasks now.
+          createdAt: existing?.createdAt ?? t.createdAt ?? new Date().toISOString(),
         };
       });
       const presentIds = new Set(mapped.map((t) => t.id));
@@ -171,6 +175,46 @@ function parsePlanUpdate(responseText: string, currentTodos: Todo[]): PlanUpdate
   } catch (e) {
     console.error('[usePlans] Failed to parse AI JSON block:', e, '\nRaw block:', match[1]);
     return { text: responseText, todos: null, planTitle: null };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// My Day suggestion parsing
+// ---------------------------------------------------------------------------
+interface RawSuggestion {
+  id: string;
+  reason: string;
+}
+
+// The model is asked for a bare JSON array, but tolerate code fences / surrounding prose.
+function parseSuggestions(responseText: string, validIds: Set<string>): RawSuggestion[] {
+  let jsonText = responseText.trim();
+  const block = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (block) {
+    jsonText = block[1].trim();
+  } else {
+    const start = jsonText.indexOf('[');
+    const end = jsonText.lastIndexOf(']');
+    if (start !== -1 && end > start) jsonText = jsonText.slice(start, end + 1);
+  }
+
+  try {
+    const parsed = JSON.parse(jsonText);
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    const out: RawSuggestion[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      const id = String((item as { id?: unknown }).id ?? '');
+      if (!id || !validIds.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      const reason = (item as { reason?: unknown }).reason;
+      out.push({ id, reason: typeof reason === 'string' ? reason.trim() : '' });
+    }
+    return out;
+  } catch (e) {
+    console.error('[usePlans] Failed to parse suggestions JSON:', e, '\nRaw:', responseText);
+    return [];
   }
 }
 
@@ -201,6 +245,13 @@ export function usePlans() {
   const [editedTitle, setEditedTitle] = useState('');
   const [aiAddedTodoIds, setAiAddedTodoIds] = useState<string[]>([]);
   const pendingProposalRef = useRef<Record<string, boolean>>({});
+  // My Day AI suggestions — stored as raw {id, reason}; the display list is derived
+  // from live todos so completed/added/deleted tasks drop out automatically.
+  const [suggestionRaw, setSuggestionRaw] = useState<{ id: string; reason: string }[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
+  const suggestionsInFlight = useRef(false);
 
   // Load all plans from the database on mount
   useEffect(() => {
@@ -212,7 +263,9 @@ export function usePlans() {
       .then((data: Plan[]) => {
         if (Array.isArray(data) && data.length > 0) {
           setPlans(data);
-          setActivePlanId(data[0].id);
+          // Never default the active plan to the hidden "My Day" backing plan.
+          const firstVisible = data.find((p) => !p.isMyDay);
+          if (firstVisible) setActivePlanId(firstVisible.id);
         }
       })
       .catch(console.error)
@@ -220,13 +273,48 @@ export function usePlans() {
   }, []);
 
   // --- Computed ---
-  const activePlan = plans.find((p) => p.id === activePlanId) ?? plans[0] ?? null;
+  // The "My Day" backing plan is hidden from the regular plan list/picker.
+  const visiblePlans = plans.filter((p) => !p.isMyDay);
+  const activePlan = visiblePlans.find((p) => p.id === activePlanId) ?? visiblePlans[0] ?? null;
   const activeTodos = activePlan?.todos.filter((t) => !t.completed) ?? [];
   const completedTodos = activePlan?.todos.filter((t) => t.completed) ?? [];
 
   const allTodos: TodoWithPlan[] = plans.flatMap((p) =>
     p.todos.map((t) => ({ ...t, planId: p.id, planTitle: p.title }))
   );
+
+  // "My Day" — every todo (across all plans) the user has flagged for today.
+  const myDayTodos: TodoWithPlan[] = allTodos.filter((t) => t.myDay);
+
+  // Suggested tasks, resolved against current todos: a suggestion disappears once
+  // the underlying task is completed, deleted, or already added to My Day.
+  const myDaySuggestions: MyDaySuggestion[] = suggestionRaw
+    .map((s) => {
+      const todo = allTodos.find((t) => t.id === s.id);
+      return todo ? { ...todo, reason: s.reason } : null;
+    })
+    .filter((x): x is MyDaySuggestion => !!x && !x.completed && !x.myDay);
+
+  // Candidates not yet in My Day, for the non-AI suggestion lists.
+  const myDayCandidates = allTodos.filter((t) => !t.completed && !t.myDay);
+
+  // Tasks due within the next 3 days (or already overdue).
+  const dueSoonCutoff = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d.toISOString().split('T')[0];
+  })();
+  const dueSoonTodos: TodoWithPlan[] = myDayCandidates
+    .filter((t) => t.dueDate && t.dueDate <= dueSoonCutoff)
+    .sort((a, b) =>
+      `${a.dueDate}T${a.dueTime || '00:00'}`.localeCompare(`${b.dueDate}T${b.dueTime || '00:00'}`)
+    )
+    .slice(0, 8);
+
+  // Most recently created tasks (those without a timestamp sort last).
+  const recentlyAddedTodos: TodoWithPlan[] = [...myDayCandidates]
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+    .slice(0, 8);
 
   const sortedAllTodos = [...allTodos].sort((a, b) => {
     if (a.completed !== b.completed) return a.completed ? 1 : -1;
@@ -327,6 +415,8 @@ export function usePlans() {
       location: '',
       locationLat: null,
       locationLng: null,
+      myDay: false,
+      createdAt: new Date().toISOString(),
       steps: [],
     };
     const newTodos = [...activePlan.todos, newTodo];
@@ -346,6 +436,134 @@ export function usePlans() {
       body: JSON.stringify(updates),
     }).catch(console.error);
   };
+
+  // --- My Day Handlers ---
+  // Toggle whether an existing todo (in any plan) appears in the My Day view.
+  const toggleMyDay = (todoId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const plan = findPlanByTodoId(todoId);
+    if (!plan) return;
+    const todo = plan.todos.find((t) => t.id === todoId);
+    if (!todo) return;
+    const newMyDay = !todo.myDay;
+    updateTodos(plan.id, plan.todos.map((t) => (t.id === todoId ? { ...t, myDay: newMyDay } : t)));
+    fetch(`/api/plans/${plan.id}/todos/${todoId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ myDay: newMyDay }),
+    }).catch(console.error);
+  };
+
+  // Lazily create (once) the hidden backing plan that owns standalone My Day todos.
+  // Returns a promise that resolves only after the plan is persisted, so todo
+  // writes (which check plan ownership) never race ahead of the plan's creation.
+  const myDayPlanRef = useRef<{ id: string; ready: Promise<void> } | null>(null);
+  const ensureMyDayPlan = (): { id: string; ready: Promise<void> } => {
+    const existing = plans.find((p) => p.isMyDay) ?? null;
+    if (existing) {
+      const entry = { id: existing.id, ready: Promise.resolve() };
+      myDayPlanRef.current = entry;
+      return entry;
+    }
+    if (myDayPlanRef.current) return myDayPlanRef.current;
+
+    const newPlan: Plan = { id: generateId(), title: 'My Day', isMyDay: true, todos: [], chat: [] };
+    setPlans((prev) => [...prev, newPlan]);
+    const ready = fetch('/api/plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newPlan),
+    }).then(() => undefined).catch((e) => { console.error(e); });
+    const entry = { id: newPlan.id, ready };
+    myDayPlanRef.current = entry;
+    return entry;
+  };
+
+  // Add a brand-new todo directly into the My Day view.
+  const addMyDayTodo = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const { id: planId, ready } = ensureMyDayPlan();
+    const newTodo: Todo = {
+      id: generateId(),
+      text: trimmed,
+      completed: false,
+      notes: '',
+      dueDate: '',
+      dueTime: '',
+      priority: 'none',
+      location: '',
+      locationLat: null,
+      locationLng: null,
+      myDay: true,
+      createdAt: new Date().toISOString(),
+      steps: [],
+    };
+    const existingTodos = plans.find((p) => p.id === planId)?.todos ?? [];
+    const nextTodos = [...existingTodos, newTodo];
+    setPlans((prev) => prev.map((p) => (p.id === planId ? { ...p, todos: nextTodos } : p)));
+    // Wait for the backing plan to exist before replacing its todo list.
+    ready.then(() => persistTodos(planId, nextTodos));
+  };
+
+  // Ask the AI to review all pending (not-yet-in-My-Day) tasks and suggest which
+  // belong on today's list. Idempotent while a request is in flight.
+  const loadSuggestions = async () => {
+    if (suggestionsInFlight.current) return;
+
+    const candidates = allTodos.filter((t) => !t.completed && !t.myDay);
+    if (candidates.length === 0) {
+      setSuggestionRaw([]);
+      setSuggestionsError(null);
+      setSuggestionsLoaded(true);
+      return;
+    }
+
+    suggestionsInFlight.current = true;
+    setSuggestionsLoading(true);
+    setSuggestionsError(null);
+
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const compact = candidates.map((t) => ({
+        id: t.id,
+        text: t.text,
+        plan: t.planTitle,
+        dueDate: t.dueDate || null,
+        dueTime: t.dueTime || null,
+        priority: t.priority,
+      }));
+
+      const system = `You are a focused daily-planning assistant inside a todo app.
+Today's date is ${today}.
+The user message is a JSON array of their PENDING tasks (none are in "My Day" yet). Each task has: id, text, plan, dueDate, dueTime, priority.
+
+Choose the tasks the user should focus on TODAY. Prioritise in this order:
+1. Overdue tasks (dueDate before today)
+2. Tasks due today
+3. High priority tasks
+4. Tasks due within the next 2–3 days
+Pick at most 5 tasks — fewer is better. Skip tasks with no real urgency.
+
+Respond with ONLY a JSON array, no prose and no code fences:
+[{ "id": "<task id>", "reason": "<max 10 words on why it belongs today>" }]
+If nothing is worth suggesting, respond with exactly: []`;
+
+      const raw = await callChat([{ role: 'user', content: JSON.stringify(compact) }], system);
+      const validIds = new Set(candidates.map((c) => c.id));
+      setSuggestionRaw(parseSuggestions(raw, validIds));
+      setSuggestionsLoaded(true);
+    } catch (e) {
+      console.error('[usePlans] loadSuggestions failed:', e);
+      setSuggestionsError('Could not load suggestions. Please try again.');
+    } finally {
+      setSuggestionsLoading(false);
+      suggestionsInFlight.current = false;
+    }
+  };
+
+  const dismissSuggestion = (id: string) =>
+    setSuggestionRaw((prev) => prev.filter((s) => s.id !== id));
 
   // --- Chat / Agent Handler ---
   const handleSendMessage = async () => {
@@ -452,7 +670,7 @@ export function usePlans() {
   };
 
   return {
-    plans,
+    plans: visiblePlans,
     activePlan,
     activePlanId,
     setActivePlanId,
@@ -460,6 +678,17 @@ export function usePlans() {
     completedTodos,
     allTodos,
     sortedAllTodos,
+    myDayTodos,
+    toggleMyDay,
+    addMyDayTodo,
+    myDaySuggestions,
+    dueSoonTodos,
+    recentlyAddedTodos,
+    suggestionsLoading,
+    suggestionsError,
+    suggestionsLoaded,
+    loadSuggestions,
+    dismissSuggestion,
     selectedTodo,
     selectedTodoId,
     setSelectedTodoId,

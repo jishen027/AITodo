@@ -28,9 +28,9 @@ export async function PUT(
     for (let i = 0; i < todos.length; i++) {
       const t = todos[i];
       await client.query(
-        `INSERT INTO todos (id, plan_id, text, completed, notes, due_date, due_time, priority, location, location_lat, location_lng, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [t.id, planId, t.text, t.completed, t.notes, t.dueDate, t.dueTime, t.priority, t.location ?? '', t.locationLat ?? null, t.locationLng ?? null, i]
+        `INSERT INTO todos (id, plan_id, text, completed, notes, due_date, due_time, priority, location, location_lat, location_lng, my_day, created_at, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), $14)`,
+        [t.id, planId, t.text, t.completed, t.notes, t.dueDate, t.dueTime, t.priority, t.location ?? '', t.locationLat ?? null, t.locationLng ?? null, t.myDay ?? false, t.createdAt ?? null, i]
       );
       for (let j = 0; j < (t.steps ?? []).length; j++) {
         const s = t.steps[j];

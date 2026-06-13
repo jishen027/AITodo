@@ -16,10 +16,10 @@ export async function GET() {
     await ensureReady();
 
     const [plansRes, todosRes, stepsRes, chatRes] = await Promise.all([
-      pool.query('SELECT id, title FROM plans WHERE user_id = $1 ORDER BY created_at ASC', [userId]),
+      pool.query('SELECT id, title, is_my_day FROM plans WHERE user_id = $1 ORDER BY created_at ASC', [userId]),
       pool.query(
         `SELECT t.id, t.plan_id, t.text, t.completed, t.notes, t.due_date, t.due_time, t.priority,
-                t.location, t.location_lat, t.location_lng, t.sort_order
+                t.location, t.location_lat, t.location_lng, t.my_day, t.created_at, t.sort_order
          FROM todos t JOIN plans p ON p.id = t.plan_id WHERE p.user_id = $1 ORDER BY t.plan_id, t.sort_order ASC`,
         [userId]
       ),
@@ -58,6 +58,8 @@ export async function GET() {
         location: r.location,
         locationLat: r.location_lat,
         locationLng: r.location_lng,
+        myDay: r.my_day,
+        createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
         steps: stepsByTodo.get(r.id) ?? [],
       });
       todosByPlan.set(r.plan_id, list);
@@ -73,6 +75,7 @@ export async function GET() {
     const plans: Plan[] = plansRes.rows.map((r) => ({
       id: r.id,
       title: r.title,
+      isMyDay: r.is_my_day,
       todos: todosByPlan.get(r.id) ?? [],
       chat: chatByPlan.get(r.id) ?? [],
     }));
@@ -90,12 +93,15 @@ export async function POST(request: Request) {
 
   await ensureReady();
   const body = (await request.json()) as Plan;
-  const { id, title, chat } = body;
+  const { id, title, chat, isMyDay } = body;
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('INSERT INTO plans (id, title, user_id) VALUES ($1, $2, $3)', [id, title, userId]);
+    await client.query(
+      'INSERT INTO plans (id, title, user_id, is_my_day) VALUES ($1, $2, $3, $4)',
+      [id, title, userId, isMyDay ?? false]
+    );
     for (const msg of chat ?? []) {
       await client.query(
         'INSERT INTO chat_messages (plan_id, role, text) VALUES ($1, $2, $3)',
@@ -103,7 +109,7 @@ export async function POST(request: Request) {
       );
     }
     await client.query('COMMIT');
-    return NextResponse.json({ id, title, todos: [], chat: chat ?? [] });
+    return NextResponse.json({ id, title, isMyDay: isMyDay ?? false, todos: [], chat: chat ?? [] });
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
