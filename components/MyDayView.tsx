@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Circle, CheckCircle2, Flag, Calendar, AlignLeft, ListChecks, Sun, X, Sparkles, RefreshCw, Loader2, Clock, Lightbulb } from 'lucide-react';
+import { Plus, Circle, CheckCircle2, Flag, Calendar, AlignLeft, ListChecks, Sun, X, Sparkles, RefreshCw, Loader2, Clock, Lightbulb, ChevronLeft } from 'lucide-react';
 import { TodoWithPlan, MyDaySuggestion } from '@/types';
 import { getPriorityColor } from '@/lib/utils';
+import { useSwipe } from '@/hooks/useSwipe';
 
 interface MyDayViewProps {
   myDayTodos: TodoWithPlan[];
@@ -109,6 +110,9 @@ export default function MyDayView({
   onDismissSuggestion,
 }: MyDayViewProps) {
   const [showPanel, setShowPanel] = useState(false);
+
+  // Mobile: swipe left inside the suggestions panel returns to the My Day view.
+  const panelSwipe = useSwipe({ onSwipeLeft: () => setShowPanel(false) });
 
   const activeTodos = myDayTodos.filter((t) => !t.completed);
   const completedTodos = myDayTodos.filter((t) => t.completed);
@@ -266,10 +270,22 @@ export default function MyDayView({
       >
         {/* Fixed-width inner pinned to the right so the width animation reads as a
             slide-in from the right edge, without reflowing the panel content. */}
-        <div className="absolute inset-y-0 right-0 w-screen sm:w-[400px] flex flex-col bg-white">
+        <div
+          className="absolute inset-y-0 right-0 w-screen sm:w-[400px] flex flex-col bg-white"
+          onTouchStart={panelSwipe.onTouchStart}
+          onTouchEnd={panelSwipe.onTouchEnd}
+        >
         {/* Panel header */}
         <div className="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
+            {/* Mobile-only: explicit way back to the My Day list (panel is full-screen on mobile) */}
+            <button
+              onClick={() => setShowPanel(false)}
+              className="sm:hidden -ml-1.5 flex items-center gap-0.5 text-sm font-medium text-indigo-600 hover:text-indigo-800 pr-1"
+            >
+              <ChevronLeft className="w-5 h-5" />
+              My Day
+            </button>
             <Sparkles className="w-5 h-5 text-indigo-500" />
             <h3 className="text-base font-bold text-gray-800">Suggestions</h3>
           </div>

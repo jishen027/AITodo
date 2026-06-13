@@ -9,6 +9,7 @@ import TodoDetails from '@/components/TodoDetails';
 import CalendarView from '@/components/CalendarView';
 import MyDayView from '@/components/MyDayView';
 import { usePlans } from '@/hooks/usePlans';
+import { useSwipe } from '@/hooks/useSwipe';
 
 type View = 'myday' | 'plans' | 'calendar';
 
@@ -62,6 +63,12 @@ export default function Home() {
   const [currentView, setCurrentView] = useState<View>('myday');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [mobilePlanTab, setMobilePlanTab] = useState<'tasks' | 'chat'>('tasks');
+
+  // Mobile: swipe right from the left edge opens the nav menu.
+  const edgeSwipe = useSwipe({
+    onSwipeRight: () => setIsSidebarOpen(true),
+    edgeSwipeRight: true,
+  });
 
   if (isLoading) {
     return (
@@ -127,7 +134,11 @@ export default function Home() {
         onSetView={handleSetView}
       />
 
-      <main className="flex-1 flex flex-col md:flex-row h-full overflow-hidden bg-white w-full relative">
+      <main
+        className="flex-1 flex flex-col md:flex-row h-full overflow-hidden bg-white w-full relative"
+        onTouchStart={edgeSwipe.onTouchStart}
+        onTouchEnd={edgeSwipe.onTouchEnd}
+      >
         {/* Mobile header */}
         <div className="md:hidden p-4 border-b border-gray-200 flex items-center justify-between bg-white z-10 shadow-sm shrink-0">
           <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 text-gray-600">
