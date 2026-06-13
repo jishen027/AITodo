@@ -24,7 +24,6 @@ export default function Home() {
     sortedAllTodos,
     myDayTodos,
     toggleMyDay,
-    addMyDayTodo,
     myDaySuggestions,
     dueSoonTodos,
     recentlyAddedTodos,
@@ -175,7 +174,6 @@ export default function Home() {
             onSelectTodo={setSelectedTodoId}
             onToggleTodo={toggleTodo}
             onRemoveFromMyDay={toggleMyDay}
-            onAddTodo={addMyDayTodo}
             suggestions={myDaySuggestions}
             dueSoonTodos={dueSoonTodos}
             recentlyAddedTodos={recentlyAddedTodos}

@@ -454,58 +454,6 @@ export function usePlans() {
     }).catch(console.error);
   };
 
-  // Lazily create (once) the hidden backing plan that owns standalone My Day todos.
-  // Returns a promise that resolves only after the plan is persisted, so todo
-  // writes (which check plan ownership) never race ahead of the plan's creation.
-  const myDayPlanRef = useRef<{ id: string; ready: Promise<void> } | null>(null);
-  const ensureMyDayPlan = (): { id: string; ready: Promise<void> } => {
-    const existing = plans.find((p) => p.isMyDay) ?? null;
-    if (existing) {
-      const entry = { id: existing.id, ready: Promise.resolve() };
-      myDayPlanRef.current = entry;
-      return entry;
-    }
-    if (myDayPlanRef.current) return myDayPlanRef.current;
-
-    const newPlan: Plan = { id: generateId(), title: 'My Day', isMyDay: true, todos: [], chat: [] };
-    setPlans((prev) => [...prev, newPlan]);
-    const ready = fetch('/api/plans', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newPlan),
-    }).then(() => undefined).catch((e) => { console.error(e); });
-    const entry = { id: newPlan.id, ready };
-    myDayPlanRef.current = entry;
-    return entry;
-  };
-
-  // Add a brand-new todo directly into the My Day view.
-  const addMyDayTodo = (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const { id: planId, ready } = ensureMyDayPlan();
-    const newTodo: Todo = {
-      id: generateId(),
-      text: trimmed,
-      completed: false,
-      notes: '',
-      dueDate: '',
-      dueTime: '',
-      priority: 'none',
-      location: '',
-      locationLat: null,
-      locationLng: null,
-      myDay: true,
-      createdAt: new Date().toISOString(),
-      steps: [],
-    };
-    const existingTodos = plans.find((p) => p.id === planId)?.todos ?? [];
-    const nextTodos = [...existingTodos, newTodo];
-    setPlans((prev) => prev.map((p) => (p.id === planId ? { ...p, todos: nextTodos } : p)));
-    // Wait for the backing plan to exist before replacing its todo list.
-    ready.then(() => persistTodos(planId, nextTodos));
-  };
-
   // Ask the AI to review all pending (not-yet-in-My-Day) tasks and suggest which
   // belong on today's list. Idempotent while a request is in flight.
   const loadSuggestions = async () => {
@@ -684,7 +632,6 @@ If nothing is worth suggesting, respond with exactly: []`;
     sortedAllTodos,
     myDayTodos,
     toggleMyDay,
-    addMyDayTodo,
     myDaySuggestions,
     dueSoonTodos,
     recentlyAddedTodos,

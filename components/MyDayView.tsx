@@ -11,7 +11,6 @@ interface MyDayViewProps {
   onSelectTodo: (id: string) => void;
   onToggleTodo: (id: string, e?: React.MouseEvent) => void;
   onRemoveFromMyDay: (id: string, e?: React.MouseEvent) => void;
-  onAddTodo: (text: string) => void;
   suggestions: MyDaySuggestion[];
   dueSoonTodos: TodoWithPlan[];
   recentlyAddedTodos: TodoWithPlan[];
@@ -99,7 +98,6 @@ export default function MyDayView({
   onSelectTodo,
   onToggleTodo,
   onRemoveFromMyDay,
-  onAddTodo,
   suggestions,
   dueSoonTodos,
   recentlyAddedTodos,
@@ -110,7 +108,6 @@ export default function MyDayView({
   onAddToMyDay,
   onDismissSuggestion,
 }: MyDayViewProps) {
-  const [newTaskText, setNewTaskText] = useState('');
   const [showPanel, setShowPanel] = useState(false);
 
   const activeTodos = myDayTodos.filter((t) => !t.completed);
@@ -122,12 +119,6 @@ export default function MyDayView({
     day: 'numeric',
   });
 
-  const handleAdd = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || !newTaskText.trim()) return;
-    onAddTodo(newTaskText);
-    setNewTaskText('');
-  };
-
   // Open the panel, kicking off the AI review on first open.
   const openPanel = () => {
     setShowPanel(true);
@@ -136,11 +127,14 @@ export default function MyDayView({
 
   // On entering My Day with an empty list, auto-open the suggestions panel so the
   // user has somewhere to start. Runs once per visit (the view remounts on nav).
+  // Desktop only — on mobile the panel would cover the whole screen, so we don't
+  // open it automatically; the Suggestions button still works there.
   const autoOpenedRef = useRef(false);
   useEffect(() => {
     if (autoOpenedRef.current) return;
     autoOpenedRef.current = true;
-    if (myDayTodos.length === 0) {
+    const isDesktop = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches;
+    if (isDesktop && myDayTodos.length === 0) {
       setShowPanel(true);
       if (!suggestionsLoaded && !suggestionsLoading) onLoadSuggestions();
     }
@@ -165,21 +159,6 @@ export default function MyDayView({
             </button>
           </div>
           <p className="text-sm text-gray-400 mb-8 pl-9">{today}</p>
-
-          {/* Add Task Input */}
-          <div className="mb-6 relative shadow-sm rounded-xl">
-            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Plus className="h-5 w-5 text-indigo-500" />
-            </div>
-            <input
-              type="text"
-              value={newTaskText}
-              onChange={(e) => setNewTaskText(e.target.value)}
-              onKeyPress={handleAdd}
-              className="block w-full pl-11 pr-3 py-3.5 bg-white border border-gray-100 rounded-xl text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow shadow-sm text-gray-700"
-              placeholder="Add a task to My Day, press Enter to save..."
-            />
-          </div>
 
           {/* Active Todos */}
           <div className="space-y-2 mb-8">
@@ -235,8 +214,8 @@ export default function MyDayView({
             {activeTodos.length === 0 && completedTodos.length === 0 && (
               <div className="text-center py-16 text-gray-400">
                 <Sun className="w-12 h-12 mx-auto mb-3 text-amber-200" />
-                <p className="text-sm">Your day is clear.</p>
-                <p className="text-xs mt-1">Add a task above, or tap “Suggestions” for ideas.</p>
+                <p className="text-sm font-medium text-gray-500">Nothing planned for today yet.</p>
+                <p className="text-xs mt-1">Open “Suggestions” for AI-picked tasks to build your day.</p>
               </div>
             )}
           </div>
