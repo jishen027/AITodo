@@ -531,19 +531,23 @@ export function usePlans() {
         plan: t.planTitle,
         dueDate: t.dueDate || null,
         dueTime: t.dueTime || null,
+        location: t.location || null,
         priority: t.priority,
       }));
 
       const system = `You are a focused daily-planning assistant inside a todo app.
 Today's date is ${today}.
-The user message is a JSON array of their PENDING tasks (none are in "My Day" yet). Each task has: id, text, plan, dueDate, dueTime, priority.
+The user message is a JSON array of their PENDING tasks (none are in "My Day" yet). Each task has: id, text, plan, dueDate, dueTime, location, priority.
 
-Choose the tasks the user should focus on TODAY. Prioritise in this order:
-1. Overdue tasks (dueDate before today)
-2. Tasks due today
-3. High priority tasks
-4. Tasks due within the next 2–3 days
-Pick at most 5 tasks — fewer is better. Skip tasks with no real urgency.
+Choose the tasks the user should focus on TODAY. Include two kinds of task:
+A) Time-sensitive tasks, prioritised in this order:
+   1. Overdue tasks (dueDate before today)
+   2. Tasks due today
+   3. High priority tasks
+   4. Tasks due within the next 2–3 days
+B) "Do it now" tasks — tasks with NO dueDate, NO dueTime, and NO location. These have no scheduling or place constraints, so the user can knock them out immediately. Include a few of these to fill the day.
+
+Pick at most 6 tasks. Lead with the most time-sensitive ones, then add "do it now" tasks. Only skip a task when it is clearly scheduled for a later date AND not high priority.
 
 Respond with ONLY a JSON array, no prose and no code fences:
 [{ "id": "<task id>", "reason": "<max 10 words on why it belongs today>" }]

@@ -147,8 +147,8 @@ export default function MyDayView({
   }, [myDayTodos.length, suggestionsLoaded, suggestionsLoading, onLoadSuggestions]);
 
   return (
-    <section className="flex-1 flex flex-col bg-[#FAFAFA] overflow-hidden">
-      <div className="flex-1 overflow-y-auto">
+    <section className="flex-1 flex bg-[#FAFAFA] overflow-hidden">
+      <div className="flex-1 min-w-0 overflow-y-auto">
         <div className="p-6 md:p-8 max-w-3xl w-full mx-auto">
           {/* Header */}
           <div className="mb-1 flex items-center justify-between gap-3">
@@ -157,8 +157,8 @@ export default function MyDayView({
               <h2 className="text-2xl font-bold text-gray-800">My Day</h2>
             </div>
             <button
-              onClick={openPanel}
-              className="flex items-center gap-1.5 text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg shadow-sm transition-colors"
+              onClick={() => (showPanel ? setShowPanel(false) : openPanel())}
+              className={`flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg shadow-sm transition-colors ${showPanel ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}
             >
               <Sparkles className="w-4 h-4" />
               Suggestions
@@ -280,15 +280,14 @@ export default function MyDayView({
         </div>
       </div>
 
-      {/* ---- Suggestions slide-over panel ---- */}
-      <div
-        onClick={() => setShowPanel(false)}
-        className={`fixed inset-0 z-40 bg-black/20 transition-opacity duration-300 ${showPanel ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-      />
+      {/* ---- Suggestions panel — splits the My Day view (no overlay) ---- */}
       <aside
-        className={`fixed top-0 right-0 z-40 h-full w-full max-w-md bg-white border-l border-gray-100 shadow-2xl flex flex-col transition-transform duration-300 ${showPanel ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`relative shrink-0 overflow-hidden bg-white transition-[width] duration-300 ease-in-out ${showPanel ? 'w-full sm:w-[400px] border-l border-gray-100 shadow-[-8px_0_24px_rgba(0,0,0,0.04)]' : 'w-0'}`}
         aria-hidden={!showPanel}
       >
+        {/* Fixed-width inner pinned to the right so the width animation reads as a
+            slide-in from the right edge, without reflowing the panel content. */}
+        <div className="absolute inset-y-0 right-0 w-screen sm:w-[400px] flex flex-col bg-white">
         {/* Panel header */}
         <div className="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
@@ -402,6 +401,7 @@ export default function MyDayView({
               </div>
             )}
           </div>
+        </div>
         </div>
       </aside>
     </section>
