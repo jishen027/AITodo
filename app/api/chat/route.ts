@@ -18,15 +18,25 @@ export async function POST(request: NextRequest) {
       model,
       messages: [{ role: 'system', content: systemInstruction }, ...messages],
       stream: true,
+      max_tokens: 8192,
     });
 
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
       async start(controller) {
+        let finishReason: string | null = null;
         try {
           for await (const chunk of stream) {
-            const text = chunk.choices[0]?.delta?.content ?? '';
+            const choice = chunk.choices[0];
+            const text = choice?.delta?.content ?? '';
             if (text) controller.enqueue(encoder.encode(text));
+            if (choice?.finish_reason) finishReason = choice.finish_reason;
+          }
+          // The model hit the output token cap and stopped mid-response (e.g. an
+          // unclosed JSON block). Emit a sentinel so the client fails loudly
+          // instead of silently parsing a half-finished plan.
+          if (finishReason === 'length') {
+            controller.enqueue(encoder.encode('<<<TRUNCATED>>>'));
           }
         } finally {
           controller.close();

@@ -112,70 +112,119 @@ function stripControlToken(text: string): { text: string; token: ControlToken } 
   if (/<<<\s*CONFIRMED\s*>>>/i.test(text)) token = 'confirmed';
   else if (/<<<\s*PROPOSED\s*>>>/i.test(text)) token = 'proposed';
   else if (/<<<\s*ASKING\s*>>>/i.test(text)) token = 'asking';
-  const cleaned = text.replace(/<<<\s*(CONFIRMED|PROPOSED|ASKING|READY)\s*>>>/gi, '').trim();
+  const cleaned = text.replace(/<<<\s*(CONFIRMED|PROPOSED|ASKING|READY|TRUNCATED)\s*>>>/gi, '').trim();
   return { text: cleaned, token };
 }
 
-function parsePlanUpdate(responseText: string, currentTodos: Todo[]): PlanUpdate {
-  const jsonRegex = /```(?:json)?\s*([\s\S]*?)```/;
-  const match = responseText.match(jsonRegex);
-  if (!match) return { text: responseText, todos: null, planTitle: null };
+// Pull a JSON payload out of a model reply. Prefer a fenced ```json block, but
+// fall back to the outermost { } / [ ] span so a reply that emits raw, unfenced
+// JSON still parses. (A truncated reply with no closing fence/brace yields no
+// parseable block — that's handled as a failure by the caller.)
+function extractJsonBlock(responseText: string): { jsonText: string; textWithout: string } | null {
+  const fenced = responseText.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) {
+    return { jsonText: fenced[1], textWithout: responseText.replace(fenced[0], '').trim() };
+  }
+  const objStart = responseText.indexOf('{');
+  const arrStart = responseText.indexOf('[');
+  let start = -1;
+  let endChar = '';
+  if (objStart !== -1 && (arrStart === -1 || objStart < arrStart)) {
+    start = objStart;
+    endChar = '}';
+  } else if (arrStart !== -1) {
+    start = arrStart;
+    endChar = ']';
+  }
+  if (start === -1) return null;
+  const end = responseText.lastIndexOf(endChar);
+  if (end <= start) return null;
+  return {
+    jsonText: responseText.slice(start, end + 1),
+    textWithout: (responseText.slice(0, start) + responseText.slice(end + 1)).trim(),
+  };
+}
+
+// Extract the raw todos array / planTitle from a model reply. No reconciliation
+// happens here — that is deliberately deferred to reconcileTodos at commit time
+// so it can run against the LATEST plan state, not a stale send-time snapshot.
+function parsePlanUpdate(responseText: string): PlanUpdate {
+  const block = extractJsonBlock(responseText);
+  if (!block) return { text: responseText, todos: null, planTitle: null };
 
   try {
-    const sanitized = match[1]
+    const sanitized = block.jsonText
       .split('\n')
       .filter((line) => !line.trim().startsWith('//'))
       .join('\n');
     const parsed = JSON.parse(sanitized);
 
-    const lockedTodos = new Map(
-      currentTodos.filter((t) => t.completed).map((t) => [t.id, t])
-    );
-    const currentById = new Map(currentTodos.map((t) => [t.id, t]));
-    const normalize = (list: Todo[]) => {
-      const mapped = list.map((t) => {
-        const locked = lockedTodos.get(t.id);
-        if (locked) return locked;
-        // Never trust AI-emitted coordinates: keep the stored ones while the
-        // location text is unchanged, otherwise reset so the map re-geocodes.
-        const existing = currentById.get(t.id);
-        const location = typeof t.location === 'string' ? t.location : existing?.location ?? '';
-        const keepCoords = !!existing && (existing.location ?? '') === location;
-        return {
-          ...t,
-          steps: t.steps ?? [],
-          dueTime: t.dueTime ?? '',
-          location,
-          locationLat: keepCoords ? existing.locationLat ?? null : null,
-          locationLng: keepCoords ? existing.locationLng ?? null : null,
-          // "My Day" is a user-managed flag the AI never sees — always preserve it.
-          myDay: existing?.myDay ?? false,
-          // Preserve original creation time; stamp newly-introduced tasks now.
-          createdAt: existing?.createdAt ?? t.createdAt ?? new Date().toISOString(),
-        };
-      });
-      const presentIds = new Set(mapped.map((t) => t.id));
-      const dropped = [...lockedTodos.values()].filter((t) => !presentIds.has(t.id));
-      return [...mapped, ...dropped];
-    };
-
     let todos: Todo[] | null = null;
     let planTitle: string | null = null;
 
     if (Array.isArray(parsed)) {
-      todos = normalize(parsed);
+      todos = parsed;
     } else if (parsed && typeof parsed === 'object') {
-      if (Array.isArray(parsed.todos)) todos = normalize(parsed.todos);
+      if (Array.isArray(parsed.todos)) todos = parsed.todos;
       if (typeof parsed.planTitle === 'string' && parsed.planTitle.trim()) {
         planTitle = parsed.planTitle.trim();
       }
     }
 
-    return { text: responseText.replace(jsonRegex, '').trim(), todos, planTitle };
+    return { text: block.textWithout, todos, planTitle };
   } catch (e) {
-    console.error('[usePlans] Failed to parse AI JSON block:', e, '\nRaw block:', match[1]);
+    console.error('[usePlans] Failed to parse AI JSON block:', e, '\nRaw block:', block.jsonText);
     return { text: responseText, todos: null, planTitle: null };
   }
+}
+
+// Merge the AI's full todo array against the LATEST plan state (`base`), not the
+// snapshot taken when the message was sent. The AI can run for many seconds (more
+// with retries) during which the user may toggle, edit, add, or delete tasks; if
+// we wrote the AI's array verbatim it would clobber those concurrent changes —
+// the "it always saves the old plan as the newest" bug.
+//   base     = the current live todos (read inside the setPlans updater)
+//   knownIds = ids the AI actually saw (the send-time snapshot)
+function reconcileTodos(aiTodos: Todo[], base: Todo[], knownIds: Set<string>): Todo[] {
+  const baseById = new Map(base.map((t) => [t.id, t]));
+  const lockedById = new Map(base.filter((t) => t.completed).map((t) => [t.id, t]));
+
+  const mapped = aiTodos
+    // Drop tasks the user deleted while the AI was responding — the AI only
+    // re-emitted them because they were in its snapshot.
+    .filter((t) => !(knownIds.has(t.id) && !baseById.has(t.id)))
+    .map((t) => {
+      // Completed tasks are sacred — always use the live copy, never the AI's.
+      const locked = lockedById.get(t.id);
+      if (locked) return locked;
+      // Never trust AI-emitted coordinates: keep the stored ones while the
+      // location text is unchanged, otherwise reset so the map re-geocodes.
+      const existing = baseById.get(t.id);
+      const location = typeof t.location === 'string' ? t.location : existing?.location ?? '';
+      const keepCoords = !!existing && (existing.location ?? '') === location;
+      return {
+        ...t,
+        steps: t.steps ?? [],
+        dueTime: t.dueTime ?? '',
+        location,
+        locationLat: keepCoords ? existing.locationLat ?? null : null,
+        locationLng: keepCoords ? existing.locationLng ?? null : null,
+        // "My Day" is a user-managed flag the AI never sees — always preserve it.
+        myDay: existing?.myDay ?? false,
+        // Preserve original creation time; stamp newly-introduced tasks now.
+        createdAt: existing?.createdAt ?? t.createdAt ?? new Date().toISOString(),
+      };
+    });
+
+  const presentIds = new Set(mapped.map((t) => t.id));
+  // Re-attach completed tasks the AI dropped (never lose finished work)...
+  const droppedLocked = [...lockedById.values()].filter((t) => !presentIds.has(t.id));
+  // ...and tasks created AFTER the AI's snapshot: it never saw them, so its
+  // omission is not a deletion — preserve concurrent user additions.
+  const concurrentlyAdded = base.filter(
+    (t) => !presentIds.has(t.id) && !knownIds.has(t.id) && !t.completed
+  );
+  return [...mapped, ...droppedLocked, ...concurrentlyAdded];
 }
 
 // ---------------------------------------------------------------------------
@@ -549,26 +598,56 @@ If nothing is worth suggesting, respond with exactly: []`;
     setStreamingTexts((prev) => ({ ...prev, [planId]: '' }));
 
     const { text: cleanedText, token } = stripControlToken(rawResponse);
-    let update = parsePlanUpdate(cleanedText, currentTodos);
+    let update = parsePlanUpdate(cleanedText);
+    // The server appends this sentinel when the model hit the output token cap and
+    // stopped mid-JSON — the #1 cause of "AI says JSON but the plan didn't change".
+    let wasTruncated = /<<<\s*TRUNCATED\s*>>>/i.test(rawResponse);
 
+    // The model is only allowed to skip JSON when it's genuinely asking a
+    // clarifying question (Phase 1) or proposing a brand-new plan it hasn't been
+    // told to commit yet (Phase 2 on an empty plan). In every other case a reply
+    // with no JSON means the model claimed/intended an update but failed to emit
+    // it — force a JSON-only retry so the change actually lands. The common bug:
+    // for a modification to an existing plan the model replies with a prose
+    // summary ending in <<<PROPOSED>>> instead of going straight to JSON.
+    const hasExistingTodos = currentTodos.length > 0;
     const shouldForce =
       !update.todos &&
+      token !== 'asking' &&
       (token === 'confirmed' ||
-        (!!pendingProposalRef.current[planId] && token !== 'asking' && token !== 'proposed'));
+        !!pendingProposalRef.current[planId] ||
+        hasExistingTodos);
 
     if (shouldForce) {
-      const forcedHistory: ApiMessage[] = [
-        ...history,
-        { role: 'assistant', content: cleanedText },
-        {
-          role: 'user',
-          content:
-            'Output the complete plan now as a single ```json code block following the schema exactly. Output ONLY the JSON block — no prose, no questions, no deferral.',
-        },
-      ];
-      const forced = parsePlanUpdate(await callChat(forcedHistory, systemInstruction), currentTodos);
-      if (forced.todos) {
-        update = { text: update.text, todos: forced.todos, planTitle: forced.planTitle ?? update.planTitle };
+      // Re-assert ground truth: the model frequently insists the plan is "already
+      // updated" and refuses to emit JSON, when in fact NOTHING has been written
+      // yet — the only way changes persist is via this JSON block. Restate the
+      // actual current todos so the model can't lean on its own prose claims, and
+      // retry a few times since a stubborn model may refuse the first attempt.
+      const forceInstruction =
+        'IMPORTANT: The plan has NOT been modified. Your previous messages were prose only ' +
+        'and were NOT applied — the plan changes ONLY when you output a JSON block. ' +
+        'Do NOT claim the plan is "already updated" or say JSON is unnecessary.\n\n' +
+        `The plan's CURRENT todos (the real, unchanged state) are:\n${JSON.stringify(currentTodos, null, 2)}\n\n` +
+        'Now output the COMPLETE updated plan — reflecting every change discussed above — ' +
+        'as a single ```json code block following the schema exactly. ' +
+        'Output ONLY the JSON block: no prose, no questions, no deferral.';
+
+      let lastAssistant = cleanedText;
+      for (let attempt = 0; attempt < 3 && !update.todos; attempt++) {
+        const forcedHistory: ApiMessage[] = [
+          ...history,
+          { role: 'assistant', content: lastAssistant },
+          { role: 'user', content: forceInstruction },
+        ];
+        const forcedRaw = await callChat(forcedHistory, systemInstruction);
+        if (/<<<\s*TRUNCATED\s*>>>/i.test(forcedRaw)) wasTruncated = true;
+        const forced = parsePlanUpdate(stripControlToken(forcedRaw).text);
+        if (forced.todos) {
+          update = { text: update.text, todos: forced.todos, planTitle: forced.planTitle ?? update.planTitle };
+        } else {
+          lastAssistant = forcedRaw;
+        }
       }
     }
 
@@ -578,19 +657,34 @@ If nothing is worth suggesting, respond with exactly: []`;
       if (addedIds.length) setAiAddedTodoIds(addedIds);
     }
 
-    const aiText = update.text || 'Tasks updated!';
+    // Only claim success when todos were actually written. If nothing was applied,
+    // surface the real reason — a truncated (too-long) response or a generic
+    // failure — instead of a misleading "Tasks updated!" or the model's own prose.
+    const aiText =
+      !update.todos && wasTruncated
+        ? "That update was too long to generate in one response, so it didn't go through. Try splitting this into smaller plans or trimming the number of tasks, then ask me again."
+        : update.text ||
+          (update.todos
+            ? 'Tasks updated!'
+            : "I wasn't able to apply that change — please rephrase it and I'll update the plan.");
 
+    // Reconcile the AI's array against the freshest todos (`p.todos`) inside the
+    // updater, so concurrent edits made while the AI was responding survive.
+    // `knownIds` are the tasks the AI actually saw at send time.
+    const knownIds = new Set(currentTodos.map((t) => t.id));
+    let committedTodos: Todo[] | null = null;
     setPlans((prev) =>
-      prev.map((p) =>
-        p.id === planId
-          ? {
-              ...p,
-              ...(update.planTitle ? { title: update.planTitle } : {}),
-              ...(update.todos ? { todos: update.todos } : {}),
-              chat: [...p.chat, { role: 'ai', text: aiText }],
-            }
-          : p
-      )
+      prev.map((p) => {
+        if (p.id !== planId) return p;
+        const todos = update.todos ? reconcileTodos(update.todos, p.todos, knownIds) : p.todos;
+        if (update.todos) committedTodos = todos;
+        return {
+          ...p,
+          ...(update.planTitle ? { title: update.planTitle } : {}),
+          ...(update.todos ? { todos } : {}),
+          chat: [...p.chat, { role: 'ai', text: aiText }],
+        };
+      })
     );
 
     // Persist chat messages
@@ -603,9 +697,9 @@ If nothing is worth suggesting, respond with exactly: []`;
       ]),
     }).catch(console.error);
 
-    // Persist todo updates
-    if (update.todos) {
-      persistTodos(planId, update.todos);
+    // Persist the reconciled todos (matches what we just committed to state).
+    if (committedTodos) {
+      persistTodos(planId, committedTodos);
     }
 
     // Persist plan title rename
