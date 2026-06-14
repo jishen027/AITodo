@@ -214,21 +214,6 @@ export default function TodoList({
           )}
         </div>
 
-        {/* Add Task Input */}
-        <div className="mb-6 relative shadow-sm rounded-xl">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Plus className="h-5 w-5 text-indigo-500" />
-          </div>
-          <input
-            type="text"
-            value={newTaskText}
-            onChange={(e) => onNewTaskTextChange(e.target.value)}
-            onKeyPress={onAddTodo}
-            className="block w-full pl-11 pr-3 py-3.5 bg-white border border-gray-100 rounded-xl text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow shadow-sm text-gray-700"
-            placeholder="Add a task, press Enter to save..."
-          />
-        </div>
-
         {/* Active Todos */}
         <div ref={listRef} className="space-y-2 mb-8">
           {activeTodos.map((todo) => (
@@ -341,6 +326,23 @@ export default function TodoList({
         )}
       </div>
       </div>{/* end scrollable */}
+
+      {/* Add Task Input — pinned to the bottom of the panel */}
+      <div className="shrink-0 border-t border-gray-100 bg-white/90 backdrop-blur-sm p-4 md:px-8">
+        <div className="relative shadow-sm rounded-xl">
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <Plus className="h-5 w-5 text-indigo-500" />
+          </div>
+          <input
+            type="text"
+            value={newTaskText}
+            onChange={(e) => onNewTaskTextChange(e.target.value)}
+            onKeyPress={onAddTodo}
+            className="block w-full pl-11 pr-3 py-3.5 bg-white border border-gray-100 rounded-xl text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow shadow-sm text-gray-700"
+            placeholder="Add a task, press Enter to save..."
+          />
+        </div>
+      </div>
 
       {/* Delete confirmation modal */}
       {pendingDeleteId && (() => {
