@@ -7,30 +7,89 @@ import { generateId } from '@/lib/utils';
 import { callChat, callChatStream, type ApiMessage } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
-// Agent System Instruction
+// Agent System Instructions
+//
+// The agent runs as TWO separate calls so each output stays single-purpose:
+//   1. buildChatInstruction → the conversational reply shown to the user
+//      (Markdown only, NEVER JSON). It decides the phase via a control token.
+//   2. buildPlanInstruction → invoked only when the chat phase is CONFIRMED;
+//      returns the plan as JSON ONLY (no prose), which becomes the todo data.
 // ---------------------------------------------------------------------------
-function buildSystemInstruction(activePlan: Plan, allPlans: Plan[]): string {
+function planContext(activePlan: Plan, allPlans: Plan[]) {
   const today = new Date().toISOString().split('T')[0];
   const completedCount = allPlans.flatMap((p) => p.todos.filter((t) => t.completed)).length;
   const pendingCount = allPlans.flatMap((p) => p.todos.filter((t) => !t.completed)).length;
-  const overdueTasks = allPlans.flatMap((p) =>
+  const overdueCount = allPlans.flatMap((p) =>
     p.todos.filter((t) => !t.completed && t.dueDate && t.dueDate < today)
-  );
-
+  ).length;
   const incompleteTodos = activePlan.todos.filter((t) => !t.completed);
   const completedTodos = activePlan.todos.filter((t) => t.completed);
+  return { today, completedCount, pendingCount, overdueCount, incompleteTodos, completedTodos };
+}
+
+// Call 1 — conversation. Markdown only, never JSON.
+function buildChatInstruction(activePlan: Plan, allPlans: Plan[]): string {
+  const { today, completedCount, pendingCount, overdueCount, incompleteTodos, completedTodos } =
+    planContext(activePlan, allPlans);
   const hasExistingTodos = incompleteTodos.length > 0 || completedTodos.length > 0;
+  // Compact task view — enough to converse about, without the full notes/steps.
+  const compact = incompleteTodos.map((t) => ({
+    id: t.id, text: t.text, dueDate: t.dueDate, dueTime: t.dueTime, priority: t.priority, location: t.location,
+  }));
 
   return `
 # Role
 You are a persistent, empathetic Planning Assistant embedded in an AI Todo app.
 Each plan has its own dedicated chat. The conversation history you receive IS the full history of this plan's chat — use it as context.
-Always match the user's language in replies, but use English for control tokens and JSON schemas.
+Always match the user's language. Reply in clean Markdown.
+NEVER output JSON or code blocks — a separate system step converts the plan into data. Your job is only to talk to the user.
 
 # Current Date: ${today}
-# Global Stats: ${completedCount} tasks completed · ${pendingCount} pending · ${overdueTasks.length} overdue
+# Global Stats: ${completedCount} tasks completed · ${pendingCount} pending · ${overdueCount} overdue
 
 ---
+
+# ACTIVE PLAN: "${activePlan.title}"
+
+## Current incomplete tasks:
+${compact.length > 0 ? JSON.stringify(compact, null, 2) : '(none yet — plan is empty)'}
+
+## Completed tasks (locked, never change):
+${completedTodos.length > 0 ? completedTodos.map((t) => `- ${t.text}`).join('\n') : '(none)'}
+
+---
+
+# Workflow
+Output EXACTLY ONE control token on its own final line at the end of EVERY reply.
+
+## Phase 1 → \`<<<ASKING>>>\`
+**Trigger:** User states a vague new goal without enough detail.
+**Action:** Ask 1–3 focused questions (timeline, constraints, outcomes, and — when tasks happen at physical places — where, e.g. which gym, store, or venue). Markdown text only.
+
+## Phase 2 → \`<<<PROPOSED>>>\`
+**Trigger:** You have enough context (goal + rough timeline + at least one constraint/priority).
+**Action:** Present the proposed plan as a Markdown table (Task | Priority | Deadline | Time | Location | Brief Steps). Use "—" for empty locations. Ask: "Does this look good?" Adjust and re-propose on tweaks (stay in Phase 2).
+
+## Phase 3 → \`<<<CONFIRMED>>>\`
+**Trigger A:** User approves the Phase 2 proposal (e.g. "looks good", "go ahead", "yes").
+**Trigger B:** ${hasExistingTodos
+    ? 'The plan already has tasks AND the user asks for a direct modification — add/remove/reschedule/rename/reprioritise a task. SKIP Phases 1 & 2 and go straight here.'
+    : 'User asks for a direct edit to an already-existing plan.'}
+**Action:** Reply with ONE short, friendly sentence stating what you changed (e.g. "Done — moved the train to 8:00 and added the SSD to your shopping run."). The app regenerates the task list automatically.
+**Do NOT** output the task list, a table, or JSON. **Do NOT** end with a colon or say "here is the plan".
+**You MUST end the reply with the \`<<<CONFIRMED>>>\` token** — it is the ONLY signal that tells the app to apply the change. Forgetting it means the plan silently does not update. Whenever the user asks to add, remove, change, reschedule, rename, or reprioritise a task, you are in Phase 3 — confirm and emit \`<<<CONFIRMED>>>\`.
+`.trim();
+}
+
+// Call 2 — plan generation. JSON only, no prose. Invoked only on CONFIRMED.
+function buildPlanInstruction(activePlan: Plan, allPlans: Plan[]): string {
+  const { today, incompleteTodos, completedTodos } = planContext(activePlan, allPlans);
+
+  return `
+# Role
+You convert the conversation above into the plan's complete task list as JSON. Output JSON ONLY — no prose, no Markdown, no code fences, no explanation.
+
+# Current Date: ${today}
 
 # ACTIVE PLAN: "${activePlan.title}"
 
@@ -40,31 +99,7 @@ ${incompleteTodos.length > 0 ? JSON.stringify(incompleteTodos, null, 2) : '(no i
 ## LOCKED Todos — completed by the user, copy verbatim, NEVER change:
 ${completedTodos.length > 0 ? JSON.stringify(completedTodos, null, 2) : '(none)'}
 
----
-
-# Workflow
-Output EXACTLY ONE control token on its own final line at the end of EVERY response.
-
-## Phase 1 → \`<<<ASKING>>>\`
-**Trigger:** User states a vague new goal without enough detail.
-**Action:** Ask 1–3 focused questions per turn (timeline, constraints, outcomes, and — when tasks happen at physical places — where, e.g. which gym, store, or venue). Text only — no table, no JSON.
-
-## Phase 2 → \`<<<PROPOSED>>>\`
-**Trigger:** You have enough context (goal + rough timeline + at least one constraint/priority).
-**Action:** Present the proposed plan as a Markdown table (Task | Priority | Deadline | Time | Location | Brief Steps). Use "—" in the Location column for tasks without one. Ask: "Does this look good?"
-**No JSON yet.** Adjust and re-propose if the user requests tweaks (stay in Phase 2).
-
-## Phase 3 → \`<<<CONFIRMED>>>\`
-**Trigger A:** User approves the Phase 2 proposal (e.g. "looks good", "go ahead", "yes", "create it").
-**Trigger B:** ${hasExistingTodos
-    ? 'The plan already has tasks AND the user asks for a direct modification — add a task, remove a task, change due date/time/priority, reschedule, rename, reorder. SKIP Phases 1 & 2 entirely and go directly here.'
-    : 'User asks for a direct edit to an already-existing plan.'}
-**Action:** One short confirmation sentence immediately followed by the complete JSON block. Never defer or say "please wait".
-
----
-
-# JSON Schema (Phase 3 only)
-Output a single \`\`\`json block — complete, no truncation:
+# Output — a SINGLE JSON object, nothing else:
 {
   "planTitle": "optional — include only to rename the plan",
   "todos": [
@@ -85,14 +120,14 @@ Output a single \`\`\`json block — complete, no truncation:
 }
 
 # Rules
-- **Output the COMPLETE todos array** — all tasks (incomplete + completed) every time you emit JSON.
-- **Locked tasks are sacred** — copy every completed todo exactly from the LOCKED section above.
-- **Never drop tasks** — if a completed task is missing from the AI output, re-attach it automatically.
-- **No placeholders** — never truncate with \`//...\` or \`/* existing tasks */\`.
-- **steps** — 3–7 specific steps per task. Preserve existing step IDs and completed state.
-- **notes** — always rich; never a single sentence or empty string.
-- **location** — proactively propose one for every task tied to a real physical place (gym, store, office, venue). Use the place the user mentioned, or infer it from context (e.g. their city or an earlier task's location). Never invent a specific venue or street address the user hasn't hinted at — if the place matters but is unknown, ask in Phase 1 or use a generic searchable name (e.g. "Gym near Birmingham city centre"). Plain text only — never output coordinates. Keep existing locations unless the user asks to change them; tasks with no physical place get an empty string.
-- Claiming the plan is "updated" or "created" without the JSON block in that same message is a failure.
+- Reflect EVERY change the user agreed to in the conversation above.
+- Output the COMPLETE todos array — all tasks (incomplete + completed).
+- Locked tasks are sacred — copy every completed todo exactly from the LOCKED section above.
+- Never drop a task unless the user explicitly asked to remove it.
+- No placeholders, no truncation (no \`//...\`), no comments.
+- steps: 3–7 specific steps per task; preserve existing step IDs and completed state.
+- notes: always rich; never a single sentence or empty string.
+- location: plain text only, never coordinates. Propose one for tasks tied to a real physical place; infer from context but never invent a specific venue the user hasn't hinted at. Keep existing locations unless the user asked to change them; empty string when there is no physical place.
 `.trim();
 }
 
@@ -145,6 +180,16 @@ function extractJsonBlock(responseText: string): { jsonText: string; textWithout
   };
 }
 
+// When a reply ends with a colon lead-in to the JSON we strip out (e.g.
+// "...以下是更新后的完整计划：" or "Here is the updated plan:"), that dangling
+// sentence points at content the user never sees. Drop the trailing colon clause
+// so the displayed message reads cleanly. The tasks themselves show in the list.
+function trimTrailingLeadIn(text: string): string {
+  const trimmed = text.trim();
+  if (!/[:：]\s*$/.test(trimmed)) return trimmed;
+  return trimmed.replace(/[^\n。．.!?！？]*[:：]\s*$/u, '').trim();
+}
+
 // Extract the raw todos array / planTitle from a model reply. No reconciliation
 // happens here — that is deliberately deferred to reconcileTodos at commit time
 // so it can run against the LATEST plan state, not a stale send-time snapshot.
@@ -171,7 +216,9 @@ function parsePlanUpdate(responseText: string): PlanUpdate {
       }
     }
 
-    return { text: block.textWithout, todos, planTitle };
+    // A JSON block was present — clean any dangling "here is the plan:" lead-in.
+    const hasJson = todos !== null || planTitle !== null;
+    return { text: hasJson ? trimTrailingLeadIn(block.textWithout) : block.textWithout, todos, planTitle };
   } catch (e) {
     console.error('[usePlans] Failed to parse AI JSON block:', e, '\nRaw block:', block.jsonText);
     return { text: responseText, todos: null, planTitle: null };
@@ -567,6 +614,18 @@ If nothing is worth suggesting, respond with exactly: []`;
     setSuggestionRaw((prev) => prev.filter((s) => s.id !== id));
 
   // --- Chat / Agent Handler ---
+  // Append an AI message to a plan's chat, in state and in the DB.
+  const appendAiMessage = (planId: string, text: string) => {
+    setPlans((prev) =>
+      prev.map((p) => (p.id === planId ? { ...p, chat: [...p.chat, { role: 'ai', text }] } : p))
+    );
+    fetch(`/api/plans/${planId}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ role: 'ai', text }]),
+    }).catch(console.error);
+  };
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !activePlan) return;
 
@@ -591,103 +650,22 @@ If nothing is worth suggesting, respond with exactly: []`;
       { role: 'user', content: userText },
     ];
 
-    const systemInstruction = buildSystemInstruction(activePlan, plans);
-    const rawResponse = await callChatStream(history, systemInstruction, (chunk) => {
+    // --- Call 1: conversational reply (Markdown only, never JSON) ---
+    const chatInstruction = buildChatInstruction(activePlan, plans);
+    const rawReply = await callChatStream(history, chatInstruction, (chunk) => {
       flushSync(() => setStreamingTexts((prev) => ({ ...prev, [planId]: (prev[planId] ?? '') + chunk })));
     });
     setStreamingTexts((prev) => ({ ...prev, [planId]: '' }));
 
-    const { text: cleanedText, token } = stripControlToken(rawResponse);
-    let update = parsePlanUpdate(cleanedText);
-    // The server appends this sentinel when the model hit the output token cap and
-    // stopped mid-JSON — the #1 cause of "AI says JSON but the plan didn't change".
-    let wasTruncated = /<<<\s*TRUNCATED\s*>>>/i.test(rawResponse);
+    const { text: chatText, token } = stripControlToken(rawReply);
+    // Belt-and-suspenders: strip any stray code block / dangling lead-in the chat
+    // model emits despite being told not to, so the user only sees clean Markdown.
+    const aiText = trimTrailingLeadIn(chatText.replace(/```[\s\S]*?```/g, '').trim()) || 'Got it.';
 
-    // The model is only allowed to skip JSON when it's genuinely asking a
-    // clarifying question (Phase 1) or proposing a brand-new plan it hasn't been
-    // told to commit yet (Phase 2 on an empty plan). In every other case a reply
-    // with no JSON means the model claimed/intended an update but failed to emit
-    // it — force a JSON-only retry so the change actually lands. The common bug:
-    // for a modification to an existing plan the model replies with a prose
-    // summary ending in <<<PROPOSED>>> instead of going straight to JSON.
-    const hasExistingTodos = currentTodos.length > 0;
-    const shouldForce =
-      !update.todos &&
-      token !== 'asking' &&
-      (token === 'confirmed' ||
-        !!pendingProposalRef.current[planId] ||
-        hasExistingTodos);
-
-    if (shouldForce) {
-      // Re-assert ground truth: the model frequently insists the plan is "already
-      // updated" and refuses to emit JSON, when in fact NOTHING has been written
-      // yet — the only way changes persist is via this JSON block. Restate the
-      // actual current todos so the model can't lean on its own prose claims, and
-      // retry a few times since a stubborn model may refuse the first attempt.
-      const forceInstruction =
-        'IMPORTANT: The plan has NOT been modified. Your previous messages were prose only ' +
-        'and were NOT applied — the plan changes ONLY when you output a JSON block. ' +
-        'Do NOT claim the plan is "already updated" or say JSON is unnecessary.\n\n' +
-        `The plan's CURRENT todos (the real, unchanged state) are:\n${JSON.stringify(currentTodos, null, 2)}\n\n` +
-        'Now output the COMPLETE updated plan — reflecting every change discussed above — ' +
-        'as a single ```json code block following the schema exactly. ' +
-        'Output ONLY the JSON block: no prose, no questions, no deferral.';
-
-      let lastAssistant = cleanedText;
-      for (let attempt = 0; attempt < 3 && !update.todos; attempt++) {
-        const forcedHistory: ApiMessage[] = [
-          ...history,
-          { role: 'assistant', content: lastAssistant },
-          { role: 'user', content: forceInstruction },
-        ];
-        const forcedRaw = await callChat(forcedHistory, systemInstruction);
-        if (/<<<\s*TRUNCATED\s*>>>/i.test(forcedRaw)) wasTruncated = true;
-        const forced = parsePlanUpdate(stripControlToken(forcedRaw).text);
-        if (forced.todos) {
-          update = { text: update.text, todos: forced.todos, planTitle: forced.planTitle ?? update.planTitle };
-        } else {
-          lastAssistant = forcedRaw;
-        }
-      }
-    }
-
-    if (update.todos) {
-      const prevIds = new Set(currentTodos.map((t) => t.id));
-      const addedIds = update.todos.filter((t) => !prevIds.has(t.id)).map((t) => t.id);
-      if (addedIds.length) setAiAddedTodoIds(addedIds);
-    }
-
-    // Only claim success when todos were actually written. If nothing was applied,
-    // surface the real reason — a truncated (too-long) response or a generic
-    // failure — instead of a misleading "Tasks updated!" or the model's own prose.
-    const aiText =
-      !update.todos && wasTruncated
-        ? "That update was too long to generate in one response, so it didn't go through. Try splitting this into smaller plans or trimming the number of tasks, then ask me again."
-        : update.text ||
-          (update.todos
-            ? 'Tasks updated!'
-            : "I wasn't able to apply that change — please rephrase it and I'll update the plan.");
-
-    // Reconcile the AI's array against the freshest todos (`p.todos`) inside the
-    // updater, so concurrent edits made while the AI was responding survive.
-    // `knownIds` are the tasks the AI actually saw at send time.
-    const knownIds = new Set(currentTodos.map((t) => t.id));
-    let committedTodos: Todo[] | null = null;
+    // Persist the user message + conversational reply, and show it immediately.
     setPlans((prev) =>
-      prev.map((p) => {
-        if (p.id !== planId) return p;
-        const todos = update.todos ? reconcileTodos(update.todos, p.todos, knownIds) : p.todos;
-        if (update.todos) committedTodos = todos;
-        return {
-          ...p,
-          ...(update.planTitle ? { title: update.planTitle } : {}),
-          ...(update.todos ? { todos } : {}),
-          chat: [...p.chat, { role: 'ai', text: aiText }],
-        };
-      })
+      prev.map((p) => (p.id === planId ? { ...p, chat: [...p.chat, { role: 'ai', text: aiText }] } : p))
     );
-
-    // Persist chat messages
     fetch(`/api/plans/${planId}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -697,21 +675,76 @@ If nothing is worth suggesting, respond with exactly: []`;
       ]),
     }).catch(console.error);
 
-    // Persist the reconciled todos (matches what we just committed to state).
-    if (committedTodos) {
-      persistTodos(planId, committedTodos);
+    // --- Call 2: generate the plan as JSON when the conversation hits a commit ---
+    // Fire when:
+    //  - the model emitted CONFIRMED, OR
+    //  - the user approved a pending proposal (model may have dropped the token), OR
+    //  - it's a modification to an existing plan (any reply that isn't a clarifying
+    //    question or a fresh proposal).
+    // The "just talk" chat model under-emits CONFIRMED, so the existing-plan
+    // fallback is what makes edits to a populated plan actually land.
+    const hasExistingTodos = currentTodos.length > 0;
+    const shouldGenerate =
+      token === 'confirmed' ||
+      (token !== 'asking' &&
+        token !== 'proposed' &&
+        (!!pendingProposalRef.current[planId] || hasExistingTodos));
+    pendingProposalRef.current[planId] = token === 'proposed';
+
+    if (shouldGenerate) {
+      const planInstruction = buildPlanInstruction(activePlan, plans);
+      const planHistory: ApiMessage[] = [
+        ...history,
+        { role: 'assistant', content: chatText },
+        { role: 'user', content: 'Now output the complete updated plan as JSON only, following the schema and rules exactly. No prose, no code fences.' },
+      ];
+
+      let parsed: PlanUpdate = { text: '', todos: null, planTitle: null };
+      let wasTruncated = false;
+      for (let attempt = 0; attempt < 3 && !parsed.todos; attempt++) {
+        const rawJson = await callChat(planHistory, planInstruction);
+        if (/<<<\s*TRUNCATED\s*>>>/i.test(rawJson)) wasTruncated = true;
+        parsed = parsePlanUpdate(stripControlToken(rawJson).text);
+      }
+
+      if (parsed.todos) {
+        const aiTodos = parsed.todos;
+        const planTitle = parsed.planTitle;
+        const knownIds = new Set(currentTodos.map((t) => t.id));
+
+        let committedTodos: Todo[] | null = null;
+        setPlans((prev) =>
+          prev.map((p) => {
+            if (p.id !== planId) return p;
+            const todos = reconcileTodos(aiTodos, p.todos, knownIds);
+            committedTodos = todos;
+            return { ...p, ...(planTitle ? { title: planTitle } : {}), todos };
+          })
+        );
+
+        // Highlight newly-added tasks for the entry animation.
+        const addedIds = aiTodos.filter((t) => !knownIds.has(t.id)).map((t) => t.id);
+        if (addedIds.length) setAiAddedTodoIds(addedIds);
+
+        if (committedTodos) persistTodos(planId, committedTodos);
+        if (planTitle) {
+          fetch(`/api/plans/${planId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: planTitle }),
+          }).catch(console.error);
+        }
+      } else {
+        // Generation failed — tell the user honestly instead of silently no-op'ing.
+        appendAiMessage(
+          planId,
+          wasTruncated
+            ? "I couldn't generate the updated plan — it was too long to fit in one response. Try splitting it into smaller plans or trimming the number of tasks."
+            : "I couldn't generate the updated plan just now. Please ask me again, or rephrase the change."
+        );
+      }
     }
 
-    // Persist plan title rename
-    if (update.planTitle) {
-      fetch(`/api/plans/${planId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: update.planTitle }),
-      }).catch(console.error);
-    }
-
-    pendingProposalRef.current[planId] = update.todos ? false : token === 'proposed';
     setTypingPlanIds((prev) => ({ ...prev, [planId]: false }));
   };
 

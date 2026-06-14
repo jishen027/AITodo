@@ -76,20 +76,30 @@ Registration is handled by `POST /api/auth/register` (custom endpoint, not part 
 All business logic lives here. Key internals:
 
 - Loads plans from `GET /api/plans` on mount; starts with `plans = []` and `isLoading = true`.
-- `buildSystemInstruction(activePlan, allPlans)` — assembles the DeepSeek system prompt. Separates **EDITABLE** (incomplete) todos from **LOCKED** (completed) todos. Rebuilt fresh on every message send.
-- `parsePlanUpdate(responseText, currentTodos)` — extracts the JSON code block from the AI response, normalises it, and enforces the locked-completed rule via a `Map`. Returns `{ text, todos, planTitle }`.
-- `stripControlToken(text)` — removes `<<<ASKING>>>` / `<<<PROPOSED>>>` / `<<<CONFIRMED>>>` tokens from the displayed text and returns which token was present.
-- `pendingProposalRef` — tracks whether the AI is in Phase 2 (plan proposed, awaiting approval). Used to trigger a force-JSON retry when the model confirms without emitting JSON.
-- `handleSendMessage` — builds full chat history from `activePlan.chat.slice(1)` (skips the opening greeting), calls the API, parses the response, applies todo updates, then persists chat messages and todos to the DB.
+- The AI agent runs as **two separate calls** so each output is single-purpose (conversation vs. data). No response ever mixes prose and JSON.
+- `buildChatInstruction(activePlan, allPlans)` — **Call 1** system prompt: the conversational reply, **Markdown only, never JSON**. Drives the phase via a control token (ASKING / PROPOSED / CONFIRMED). Gets a compact task view + locked-task list as context.
+- `buildPlanInstruction(activePlan, allPlans)` — **Call 2** system prompt: invoked only when Call 1 returns CONFIRMED. Returns the complete plan as **JSON only** (no prose). Includes the full EDITABLE/LOCKED todos and schema.
+- `planContext(activePlan, allPlans)` — shared helper both builders use (date, global stats, incomplete/completed todo split).
+- `extractJsonBlock(responseText)` — pulls JSON from a reply: prefers a fenced ```json block, falls back to the outermost `{}`/`[]` span (handles unfenced JSON).
+- `parsePlanUpdate(responseText)` — runs `extractJsonBlock`, parses, and returns the **raw** `{ text, todos, planTitle }`. Does **not** reconcile (that's deferred to commit time).
+- `reconcileTodos(aiTodos, base, knownIds)` — merges the AI's array against the **latest** live todos (read inside the `setPlans` updater, not a send-time snapshot). Re-locks completed tasks, preserves `myDay`/coords/`createdAt`, drops tasks the user deleted mid-request, and keeps tasks the user added mid-request. Prevents a stale AI array from clobbering concurrent edits.
+- `stripControlToken(text)` — removes `<<<ASKING>>>` / `<<<PROPOSED>>>` / `<<<CONFIRMED>>>` / `<<<TRUNCATED>>>` tokens from the displayed text and returns which control token was present.
+- `trimTrailingLeadIn(text)` — drops a dangling "here is the plan:" colon lead-in from the conversational reply.
+- `pendingProposalRef` — tracks whether the AI is in Phase 2 (plan proposed, awaiting approval). Used to fire Call 2 when the user approves but the model forgot the CONFIRMED token.
+- `handleSendMessage` — builds chat history from `activePlan.chat.slice(1)` (skips the opening greeting); streams Call 1 and shows it immediately; if CONFIRMED, runs Call 2 (JSON, up to 3 attempts) and applies the reconciled todos. Persists chat + todos optimistically.
+
+`app/api/chat/route.ts` sets `max_tokens: 8192` and appends a `<<<TRUNCATED>>>` sentinel when the model stops on `finish_reason === 'length'`, so the client can fail loudly instead of parsing a half-finished plan.
 
 Every mutation (create/delete plan, rename, toggle/delete/add/edit todo, AI response) fires the appropriate API route optimistically — React state is updated first, then the fetch is dispatched.
 
 ### AI agent 3-phase workflow
 
-The system instruction drives a state machine:
-1. **Phase 1 `<<<ASKING>>>`** — gather goal details, no JSON
+Call 1 (the conversation) drives a state machine via a control token:
+1. **Phase 1 `<<<ASKING>>>`** — gather goal details (Markdown questions)
 2. **Phase 2 `<<<PROPOSED>>>`** — show plan as Markdown table, await approval
-3. **Phase 3 `<<<CONFIRMED>>>`** — emit full todos JSON; also triggered directly for modifications to an existing plan (add/edit/remove/reschedule tasks)
+3. **Phase 3 `<<<CONFIRMED>>>`** — a short Markdown confirmation of what changed; also triggered directly for modifications to an existing plan (add/edit/remove/reschedule tasks)
+
+Call 1 **never emits JSON**. When it reaches Phase 3, `handleSendMessage` fires **Call 2** (`buildPlanInstruction`), which returns the full todos JSON. This is the only call that produces plan data.
 
 ### API routes
 
@@ -116,6 +126,6 @@ All plan/todo/chat routes check `auth()` and return 401 if unauthenticated.
 - **`TodoList`** — active/completed todo columns for the selected plan; GSAP entry animation for AI-created todos
 - **`ChatPanel`** — chat UI for the active plan; slides in/out relative to `TodoDetails`
 - **`TodoDetails`** — drawer (shadcn-style, built on `vaul`) for editing a single todo (title, priority, due date/time, location, steps, notes); right-side panel on `md:`+, bottom sheet with drag handle on mobile; portaled with dimmed overlay, closes via Esc, overlay click, or drag-to-dismiss
-- **`LocationPicker`** — location field inside `TodoDetails`: Places autocomplete + embedded Google Map (`@vis.gl/react-google-maps`); lazily geocodes plain-text locations (e.g. set by the AI), click-to-move pin with reverse geocoding; falls back to a plain text input when `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unset. AI-emitted coordinates are never trusted — `parsePlanUpdate` resets coords whenever the location text changes.
+- **`LocationPicker`** — location field inside `TodoDetails`: Places autocomplete + embedded Google Map (`@vis.gl/react-google-maps`); lazily geocodes plain-text locations (e.g. set by the AI), click-to-move pin with reverse geocoding; falls back to a plain text input when `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unset. AI-emitted coordinates are never trusted — `reconcileTodos` resets coords whenever the location text changes.
 - **`CalendarView`** — monthly grid + all-tasks list; todos sorted by `dueDate + dueTime` within each day; `TodoMap` rendered below the grid
 - **`TodoMap`** — Google Map plotting every todo that has coordinates; pins colored by priority (gray when completed), click selects the todo. Auto-fit bounds track only *incomplete* pins (falling back to all pins when every located task is done), so completing a todo re-fits the view around the remaining active tasks with an eased camera animation (disabled under `prefers-reduced-motion`). Renders nothing without `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
