@@ -49,6 +49,9 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 # Static assets served by Next.js
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static   ./.next/static
+# public/ (logo + PWA icons) — standalone output excludes it, so copy it
+# explicitly or the node server 404s on /logo.png, /icon-*.png, etc.
+COPY --from=builder --chown=nextjs:nodejs /app/public         ./public
 
 USER nextjs
 EXPOSE 3000
