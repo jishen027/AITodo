@@ -3,6 +3,7 @@
 import { X, Plus, ListTodo, Trash2, LayoutDashboard, CalendarDays, LogOut, Sun } from 'lucide-react';
 import { useSession, signOut } from 'next-auth/react';
 import { Plan } from '@/types';
+import logo from '@/public/logo.png';
 
 type View = 'myday' | 'plans' | 'calendar';
 
@@ -51,7 +52,7 @@ export default function Sidebar({
       <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
         <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="AI Todo" className="w-6 h-6 rounded-md" />
+          <img src={logo.src} alt="AI Todo" className="w-6 h-6 rounded-md" />
           AI Todo
         </h1>
         <button onClick={onClose} className="md:hidden p-1 text-gray-500 hover:bg-gray-200 rounded">

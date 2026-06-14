@@ -4,6 +4,7 @@ import { useState, FormEvent } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import logo from '@/public/logo.png';
 
 function GoogleIcon() {
   return (
@@ -69,7 +70,7 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="AI Todo" className="w-8 h-8 rounded-lg" />
+            <img src={logo.src} alt="AI Todo" className="w-8 h-8 rounded-lg" />
             <span className="text-2xl font-bold text-gray-900">AI Todo</span>
           </div>
           <p className="text-sm text-gray-500">Sign in to your account</p>

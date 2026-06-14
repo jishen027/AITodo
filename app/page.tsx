@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import logo from '@/public/logo.png';
 import { useEffect, useRef } from 'react';
 import { MessageSquare, CalendarDays, Layers, LayoutDashboard, LogOut } from 'lucide-react';
 import gsap from 'gsap';
@@ -132,7 +133,7 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="AI Todo" className="w-7 h-7 rounded-lg" />
+            <img src={logo.src} alt="AI Todo" className="w-7 h-7 rounded-lg" />
             <span className="font-bold text-gray-900 text-lg">AI Todo</span>
           </div>
           <div className="flex items-center gap-3">
