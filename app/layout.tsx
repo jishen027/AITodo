@@ -10,6 +10,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  themeColor: '#6366f1',
   // Make the on-screen keyboard shrink the layout viewport instead of
   // overlaying it, so bottom-anchored inputs stay visible while typing.
   interactiveWidget: 'resizes-content',

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef } from 'react';
-import { CheckCircle2, MessageSquare, CalendarDays, Layers, LayoutDashboard, LogOut } from 'lucide-react';
+import { MessageSquare, CalendarDays, Layers, LayoutDashboard, LogOut } from 'lucide-react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useSession, signOut } from 'next-auth/react';
@@ -131,7 +131,8 @@ export default function LandingPage() {
       <header ref={navRef} className="border-b border-gray-100">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-6 h-6 text-indigo-600" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="AI Todo" className="w-7 h-7 rounded-lg" />
             <span className="font-bold text-gray-900 text-lg">AI Todo</span>
           </div>
           <div className="flex items-center gap-3">
