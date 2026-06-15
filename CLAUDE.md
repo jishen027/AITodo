@@ -77,18 +77,19 @@ All business logic lives here. Key internals:
 
 - Loads plans from `GET /api/plans` on mount; starts with `plans = []` and `isLoading = true`.
 - The AI agent runs as **two separate calls** so each output is single-purpose (conversation vs. data). No response ever mixes prose and JSON.
-- `buildChatInstruction(activePlan, allPlans)` — **Call 1** system prompt: the conversational reply, **Markdown only, never JSON**. Drives the phase via a control token (ASKING / PROPOSED / CONFIRMED). Gets a compact task view + locked-task list as context.
-- `buildPlanInstruction(activePlan, allPlans)` — **Call 2** system prompt: invoked only when Call 1 returns CONFIRMED. Returns the complete plan as **JSON only** (no prose). Includes the full EDITABLE/LOCKED todos and schema.
+- `buildChatInstruction(activePlan, allPlans)` — **Call 1** system prompt: the conversational reply, **Markdown only, never JSON**. Drives the phase via a control token (ASKING / PROPOSED / CONFIRMED). Gets a compact view of the **incomplete** tasks plus a locked-task **count** (completed tasks' contents are never sent to the chat).
+- `buildPlanInstruction(activePlan, allPlans)` — **Call 2** system prompt: invoked only when Call 1 returns CONFIRMED. Returns an **incremental delta as JSON only** — `{ planTitle?, upsert[], remove[] }`, where `upsert` is the incomplete tasks that are new/changed and `remove` is ids to delete. Sees only the EDITABLE (incomplete) todos plus a count of hidden completed ones; never re-emits the whole plan and never touches completed tasks.
 - `planContext(activePlan, allPlans)` — shared helper both builders use (date, global stats, incomplete/completed todo split).
 - `extractJsonBlock(responseText)` — pulls JSON from a reply: prefers a fenced ```json block, falls back to the outermost `{}`/`[]` span (handles unfenced JSON).
-- `parsePlanUpdate(responseText)` — runs `extractJsonBlock`, parses, and returns the **raw** `{ text, todos, planTitle }`. Does **not** reconcile (that's deferred to commit time).
-- `reconcileTodos(aiTodos, base, knownIds)` — merges the AI's array against the **latest** live todos (read inside the `setPlans` updater, not a send-time snapshot). Re-locks completed tasks, preserves `myDay`/coords/`createdAt`, drops tasks the user deleted mid-request, and keeps tasks the user added mid-request. Prevents a stale AI array from clobbering concurrent edits.
+- `salvageObjectArray(text, key)` — best-effort recovery for truncated JSON: scans the named array (`upsert`) and returns every **complete** `{...}` object, discarding a cut-off trailing element. Lets a length-truncated response still apply the tasks that arrived.
+- `parsePlanUpdate(responseText)` — runs `extractJsonBlock`, parses, and returns the **raw** `{ text, upsert, remove, planTitle }` (`upsert: null` only when nothing parseable was recovered). On a JSON parse failure it falls back to `salvageObjectArray`. Does **not** reconcile (that's deferred to commit time). Also tolerates a legacy full-array reply by reading `todos` as `upsert`.
+- `applyTodoDelta(upsert, remove, base, knownIds)` — applies the delta against the **latest** live todos (read inside the `setPlans` updater, not a send-time snapshot). Completed tasks are never modified or removed; unchanged incomplete tasks are kept verbatim (the AI doesn't re-send them); `remove` deletes named incomplete tasks; leftover upserts are added as new tasks unless the id was in `knownIds` but gone from `base` (user deleted it mid-request → not resurrected). `mergeUpsertTodo` restores `myDay`/coords/`createdAt` from the existing copy. Touching only named tasks sidesteps stale-array clobbering by construction.
 - `stripControlToken(text)` — removes `<<<ASKING>>>` / `<<<PROPOSED>>>` / `<<<CONFIRMED>>>` / `<<<TRUNCATED>>>` tokens from the displayed text and returns which control token was present.
 - `trimTrailingLeadIn(text)` — drops a dangling "here is the plan:" colon lead-in from the conversational reply.
 - `pendingProposalRef` — tracks whether the AI is in Phase 2 (plan proposed, awaiting approval). Used to fire Call 2 when the user approves but the model forgot the CONFIRMED token.
-- `handleSendMessage` — builds chat history from `activePlan.chat.slice(1)` (skips the opening greeting); streams Call 1 and shows it immediately; if CONFIRMED, runs Call 2 (JSON, up to 3 attempts) and applies the reconciled todos. Persists chat + todos optimistically.
+- `handleSendMessage` — builds chat history from `activePlan.chat.slice(1)` (skips the opening greeting); streams Call 1 and shows it immediately; if CONFIRMED, runs Call 2 (delta JSON, up to 3 attempts) and applies it via `applyTodoDelta`. Persists chat + todos optimistically.
 
-`app/api/chat/route.ts` sets `max_tokens: 8192` and appends a `<<<TRUNCATED>>>` sentinel when the model stops on `finish_reason === 'length'`, so the client can fail loudly instead of parsing a half-finished plan.
+`app/api/chat/route.ts` sets `max_tokens: 8192` and appends a `<<<TRUNCATED>>>` sentinel when the model stops on `finish_reason === 'length'`, so the client can fail loudly instead of parsing a half-finished plan. Because Call 2 now emits only a delta (not the full plan), responses are far smaller and rarely hit this cap; if one is still truncated, `salvageObjectArray` recovers the complete tasks that arrived.
 
 Every mutation (create/delete plan, rename, toggle/delete/add/edit todo, AI response) fires the appropriate API route optimistically — React state is updated first, then the fetch is dispatched.
 
@@ -99,7 +100,7 @@ Call 1 (the conversation) drives a state machine via a control token:
 2. **Phase 2 `<<<PROPOSED>>>`** — show plan as Markdown table, await approval
 3. **Phase 3 `<<<CONFIRMED>>>`** — a short Markdown confirmation of what changed; also triggered directly for modifications to an existing plan (add/edit/remove/reschedule tasks)
 
-Call 1 **never emits JSON**. When it reaches Phase 3, `handleSendMessage` fires **Call 2** (`buildPlanInstruction`), which returns the full todos JSON. This is the only call that produces plan data.
+Call 1 **never emits JSON**. When it reaches Phase 3, `handleSendMessage` fires **Call 2** (`buildPlanInstruction`), which returns an incremental delta (`upsert` + `remove`) of the incomplete tasks only. This is the only call that produces plan data.
 
 ### API routes
 
