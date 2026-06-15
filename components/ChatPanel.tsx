@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Bot, User, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -19,7 +19,17 @@ interface ChatPanelProps {
 
 export default function ChatPanel({ chat, isTyping, streamingText, inputMessage, visible, planTitle, onInputChange, onSend }: ChatPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // True while an IME composition is active (e.g. typing Chinese/Japanese) — we
+  // must not treat the Enter that confirms a candidate as "send".
+  const composingRef = useRef(false);
+  // On touch devices there is no Shift+Enter, so Enter inserts a newline and the
+  // user sends with the button — the conventional mobile-chat behaviour.
+  const [enterInsertsNewline, setEnterInsertsNewline] = useState(false);
+
+  useEffect(() => {
+    setEnterInsertsNewline(window.matchMedia('(pointer: coarse)').matches);
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -33,6 +43,28 @@ export default function ChatPanel({ chat, isTyping, streamingText, inputMessage,
       inputRef.current?.focus();
     }
   }, [isTyping, visible]);
+
+  // Auto-grow the textarea to fit its content, capped so it never eats the
+  // whole panel. Re-runs as the text (and so the row count) changes.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [inputMessage]);
+
+  const submit = () => {
+    if (isTyping || !inputMessage.trim()) return;
+    onSend();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter') return;
+    // Let IME confirmations, Shift+Enter, and mobile Enter fall through as newlines.
+    if (e.shiftKey || composingRef.current || e.nativeEvent.isComposing || enterInsertsNewline) return;
+    e.preventDefault();
+    submit();
+  };
 
   return (
     <div className={`absolute inset-0 flex flex-col ${!visible ? 'pointer-events-none' : ''}`}>
@@ -53,7 +85,7 @@ export default function ChatPanel({ chat, isTyping, streamingText, inputMessage,
             </div>
 
             {msg.role === 'user' ? (
-              <div className="max-w-[80%] rounded-2xl rounded-tr-none px-4 py-2.5 text-sm leading-relaxed bg-indigo-600 text-white">
+              <div className="max-w-[80%] rounded-2xl rounded-tr-none px-4 py-2.5 text-sm leading-relaxed bg-indigo-600 text-white whitespace-pre-wrap break-words">
                 {msg.text}
               </div>
             ) : (
@@ -174,25 +206,35 @@ export default function ChatPanel({ chat, isTyping, streamingText, inputMessage,
       </div>
 
       <div className="p-4 bg-white border-t border-gray-100 shrink-0">
-        <div className="relative flex items-center">
-          <input
+        <div className="relative flex items-end">
+          <textarea
             ref={inputRef}
-            type="text"
+            rows={1}
             value={inputMessage}
             onChange={(e) => onInputChange(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && onSend()}
+            onKeyDown={handleKeyDown}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => { composingRef.current = false; }}
             placeholder="Tell AI what to plan for you..."
-            className="w-full pl-4 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+            className="w-full resize-none pl-4 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm leading-relaxed max-h-40 overflow-y-auto"
             disabled={isTyping}
           />
           <button
-            onClick={onSend}
+            onClick={submit}
             disabled={isTyping || !inputMessage.trim()}
-            className="absolute right-2 p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg disabled:opacity-50 disabled:hover:bg-transparent transition"
+            aria-label="Send message"
+            className="absolute right-2 bottom-2 p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg disabled:opacity-50 disabled:hover:bg-transparent transition"
           >
             <Send className="w-4 h-4" />
           </button>
         </div>
+        {!enterInsertsNewline && (
+          <p className="mt-1.5 px-1 text-[11px] text-gray-400 select-none">
+            <kbd className="font-sans font-medium text-gray-500">Enter</kbd> to send ·{' '}
+            <kbd className="font-sans font-medium text-gray-500">Shift</kbd>+
+            <kbd className="font-sans font-medium text-gray-500">Enter</kbd> for a new line
+          </p>
+        )}
       </div>
     </div>
   );
