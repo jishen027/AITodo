@@ -12,7 +12,9 @@ An AI-powered task planning app built with Next.js. Chat with an AI agent to bre
 - **Task locations** — attach a place to a task via Google Places autocomplete with an embedded map and click-to-move pin (falls back to plain text without an API key)
 - **Calendar view** — monthly grid showing all tasks across plans, sorted by time within each day
 - **Task map** — every located task plotted on a Google Map below the calendar, pins colored by priority; the view auto-fits around incomplete tasks
-- **Completed tasks are locked** — tasks you check off are never modified by the AI
+- **Completed tasks are locked** — tasks you check off are never sent to the AI, regenerated, or modified
+- **Incremental updates** — when you change a plan via chat, the AI emits only the tasks that were added, edited, or removed; unchanged and completed tasks are preserved untouched (no full-plan regeneration)
+- **Non-blocking editing** — keep editing tasks manually throughout the conversation; the task list locks (with an "AI is updating your plan" overlay) only for the brief moment the AI is writing its changes
 - **Persistent storage** — all plans, tasks, and chat history are saved in PostgreSQL
 - **User authentication** — each user has their own private plans; email/password registration or Google sign-in via NextAuth
 
@@ -70,8 +72,8 @@ Open [http://localhost:3000](http://localhost:3000). The database tables are cre
 1. **Register** — create an account on the `/register` page (or sign in with Google); you are signed in automatically
 2. **Create a plan** — click **New Plan** in the sidebar
 3. **Chat with the AI** — describe your goal in the chat panel; the AI will ask clarifying questions, propose a plan for review, then create the tasks once you confirm
-4. **Edit tasks manually** — click any task to open the details panel and edit the title, priority, due date/time, location, steps, or notes
-5. **Update via chat** — send follow-up messages in the same chat to add, remove, or reschedule tasks; the AI will update only the incomplete ones
+4. **Edit tasks manually** — click any task to open the details panel and edit the title, priority, due date/time, location, steps, or notes; manual edits stay available while you chat and are only briefly locked while the AI applies its own changes
+5. **Update via chat** — send follow-up messages in the same chat to add, remove, or reschedule tasks; the AI changes only the affected incomplete tasks and leaves completed and unchanged ones alone
 6. **Calendar** — switch to the Calendar view from the sidebar to see all tasks across plans on a monthly grid, with located tasks plotted on a map below
 7. **Sign out** — click the arrow icon next to your name in the sidebar footer
 
