@@ -88,6 +88,7 @@ All business logic lives here. Key internals:
 - `trimTrailingLeadIn(text)` — drops a dangling "here is the plan:" colon lead-in from the conversational reply.
 - `pendingProposalRef` — tracks whether the AI is in Phase 2 (plan proposed, awaiting approval). Used to fire Call 2 when the user approves but the model forgot the CONFIRMED token.
 - `handleSendMessage` — builds chat history from `activePlan.chat.slice(1)` (skips the opening greeting); streams Call 1 and shows it immediately; if CONFIRMED, runs Call 2 (delta JSON, up to 3 attempts) and applies it via `applyTodoDelta`. Persists chat + todos optimistically.
+- Two activity flags drive the UI: `isTyping` (`typingPlanIds`) is true for the whole exchange (set at the start of `handleSendMessage`); `isUpdatingPlan` (`updatingPlanIds`) is true **only while Call 2 runs**. `TodoList` locks editing (frosted overlay, "AI is updating your plan") on `isUpdatingPlan` so the conversation phase (Call 1) still allows manual todo edits — editing is blocked only during the JSON write.
 
 `app/api/chat/route.ts` sets `max_tokens: 8192` and appends a `<<<TRUNCATED>>>` sentinel when the model stops on `finish_reason === 'length'`, so the client can fail loudly instead of parsing a half-finished plan. Because Call 2 now emits only a delta (not the full plan), responses are far smaller and rarely hit this cap; if one is still truncated, `salvageObjectArray` recovers the complete tasks that arrived.
 

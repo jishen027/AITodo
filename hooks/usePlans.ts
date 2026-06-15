@@ -411,6 +411,10 @@ export function usePlans() {
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [inputMessage, setInputMessage] = useState('');
   const [typingPlanIds, setTypingPlanIds] = useState<Record<string, boolean>>({});
+  // True only while Call 2 (plan JSON generation) is running for a plan. Editing
+  // the plan's todos is locked during this window; the conversation phase (Call 1)
+  // leaves it false so the user can keep editing while just chatting.
+  const [updatingPlanIds, setUpdatingPlanIds] = useState<Record<string, boolean>>({});
   const [streamingTexts, setStreamingTexts] = useState<Record<string, string>>({});
   const [newTaskText, setNewTaskText] = useState('');
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
@@ -787,6 +791,9 @@ If nothing is worth suggesting, respond with exactly: []`;
     pendingProposalRef.current[planId] = token === 'proposed';
 
     if (shouldGenerate) {
+      // Lock plan editing while the JSON delta is generated — the UI shows
+      // "AI is updating your plan." so the user can't race the AI's write.
+      setUpdatingPlanIds((prev) => ({ ...prev, [planId]: true }));
       const planInstruction = buildPlanInstruction(activePlan, plans);
       const planHistory: ApiMessage[] = [
         ...history,
@@ -796,10 +803,14 @@ If nothing is worth suggesting, respond with exactly: []`;
 
       let parsed: PlanUpdate = { text: '', upsert: null, remove: [], planTitle: null };
       let wasTruncated = false;
-      for (let attempt = 0; attempt < 3 && !parsed.upsert; attempt++) {
-        const rawJson = await callChat(planHistory, planInstruction);
-        if (/<<<\s*TRUNCATED\s*>>>/i.test(rawJson)) wasTruncated = true;
-        parsed = parsePlanUpdate(stripControlToken(rawJson).text);
+      try {
+        for (let attempt = 0; attempt < 3 && !parsed.upsert; attempt++) {
+          const rawJson = await callChat(planHistory, planInstruction);
+          if (/<<<\s*TRUNCATED\s*>>>/i.test(rawJson)) wasTruncated = true;
+          parsed = parsePlanUpdate(stripControlToken(rawJson).text);
+        }
+      } finally {
+        setUpdatingPlanIds((prev) => ({ ...prev, [planId]: false }));
       }
 
       if (parsed.upsert) {
@@ -876,6 +887,7 @@ If nothing is worth suggesting, respond with exactly: []`;
     inputMessage,
     setInputMessage,
     isTyping: !!typingPlanIds[activePlan?.id ?? ''],
+    isUpdatingPlan: !!updatingPlanIds[activePlan?.id ?? ''],
     streamingText: streamingTexts[activePlan?.id ?? ''] ?? '',
     isLoading,
     newTaskText,

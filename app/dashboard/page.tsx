@@ -39,6 +39,7 @@ export default function Home() {
     inputMessage,
     setInputMessage,
     isTyping,
+    isUpdatingPlan,
     streamingText,
     isLoading,
     newTaskText,
@@ -221,7 +222,7 @@ export default function Home() {
                 editingTitleId={editingTitleId}
                 editedTitle={editedTitle}
                 aiAddedTodoIds={aiAddedTodoIds}
-                isAiUpdating={isTyping}
+                isAiUpdating={isUpdatingPlan}
                 onAnimationDone={clearAiAddedTodoIds}
                 onSelectTodo={setSelectedTodoId}
                 onToggleTodo={toggleTodo}
