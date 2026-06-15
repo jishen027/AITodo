@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { Plan, Todo, TodoWithPlan, MyDaySuggestion } from '@/types';
 import { generateId } from '@/lib/utils';
@@ -349,24 +349,43 @@ export function usePlans() {
   const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
   const suggestionsInFlight = useRef(false);
 
+  // Fetch all plans from the database and merge into state. Used on mount and by
+  // pull-to-refresh. Preserves the current active plan when it still exists,
+  // otherwise falls back to the first visible (non-"My Day") plan.
+  const loadPlans = useCallback(async () => {
+    const r = await fetch('/api/plans');
+    if (!r.ok) throw new Error(`GET /api/plans failed: ${r.status}`);
+    const data: Plan[] = await r.json();
+    if (!Array.isArray(data)) return;
+    setPlans(data);
+    setActivePlanId((cur) => {
+      // Never default the active plan to the hidden "My Day" backing plan.
+      const visible = data.filter((p) => !p.isMyDay);
+      if (cur && visible.some((p) => p.id === cur)) return cur;
+      return visible[0]?.id ?? cur;
+    });
+  }, []);
+
   // Load all plans from the database on mount
   useEffect(() => {
-    fetch('/api/plans')
-      .then((r) => {
-        if (!r.ok) throw new Error(`GET /api/plans failed: ${r.status}`);
-        return r.json();
-      })
-      .then((data: Plan[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setPlans(data);
-          // Never default the active plan to the hidden "My Day" backing plan.
-          const firstVisible = data.find((p) => !p.isMyDay);
-          if (firstVisible) setActivePlanId(firstVisible.id);
-        }
-      })
+    loadPlans()
       .catch(console.error)
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [loadPlans]);
+
+  // Re-fetch plans on demand (pull-to-refresh). Swallows errors so the pull
+  // indicator always resolves, and holds the spinner briefly so a near-instant
+  // refresh still reads as one.
+  const refreshPlans = useCallback(async () => {
+    const started = Date.now();
+    try {
+      await loadPlans();
+    } catch (e) {
+      console.error('[usePlans] refreshPlans failed:', e);
+    }
+    const elapsed = Date.now() - started;
+    if (elapsed < 400) await new Promise((res) => setTimeout(res, 400 - elapsed));
+  }, [loadPlans]);
 
   // --- Computed ---
   // The "My Day" backing plan is hidden from the regular plan list/picker.
@@ -788,6 +807,7 @@ If nothing is worth suggesting, respond with exactly: []`;
     setEditingTitleId,
     editedTitle,
     setEditedTitle,
+    refreshPlans,
     createPlan,
     deletePlan,
     updatePlanTitle,

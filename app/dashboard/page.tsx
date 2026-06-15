@@ -47,6 +47,7 @@ export default function Home() {
     setEditingTitleId,
     editedTitle,
     setEditedTitle,
+    refreshPlans,
     createPlan,
     deletePlan,
     updatePlanTitle,
@@ -189,6 +190,7 @@ export default function Home() {
           />
         ) : currentView === 'myday' ? (
           <MyDayView
+            onRefresh={refreshPlans}
             myDayTodos={myDayTodos}
             selectedTodoId={selectedTodoId}
             onSelectTodo={setSelectedTodoId}
@@ -210,6 +212,7 @@ export default function Home() {
                 hidden md:contents hides on mobile when chat tab is active */}
             <div className={mobilePlanTab === 'chat' ? 'hidden md:contents' : 'contents'}>
               <TodoList
+                onRefresh={refreshPlans}
                 plan={activePlan}
                 activeTodos={activeTodos}
                 completedTodos={completedTodos}

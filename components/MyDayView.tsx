@@ -5,8 +5,10 @@ import { Plus, Circle, CheckCircle2, Flag, Calendar, AlignLeft, ListChecks, Sun,
 import { TodoWithPlan, MyDaySuggestion } from '@/types';
 import { getPriorityColor } from '@/lib/utils';
 import { useSwipe } from '@/hooks/useSwipe';
+import PullToRefresh from '@/components/PullToRefresh';
 
 interface MyDayViewProps {
+  onRefresh: () => void | Promise<void>;
   myDayTodos: TodoWithPlan[];
   selectedTodoId: string | null;
   onSelectTodo: (id: string) => void;
@@ -94,6 +96,7 @@ function SectionHeading({ icon, title, count }: { icon: React.ReactNode; title: 
 }
 
 export default function MyDayView({
+  onRefresh,
   myDayTodos,
   selectedTodoId,
   onSelectTodo,
@@ -146,7 +149,7 @@ export default function MyDayView({
 
   return (
     <section className="flex-1 flex bg-[#FAFAFA] overflow-hidden">
-      <div className="flex-1 min-w-0 overflow-y-auto">
+      <PullToRefresh onRefresh={onRefresh} className="flex-1 min-w-0">
         <div className="p-6 md:p-8 max-w-3xl w-full mx-auto">
           {/* Header */}
           <div className="mb-1 flex items-center justify-between gap-3">
@@ -261,7 +264,7 @@ export default function MyDayView({
             </div>
           )}
         </div>
-      </div>
+      </PullToRefresh>
 
       {/* ---- Suggestions panel — splits the My Day view (no overlay) ---- */}
       <aside

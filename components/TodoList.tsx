@@ -6,8 +6,10 @@ import { Plus, Circle, CheckCircle2, Trash2, Flag, Calendar, AlignLeft, Edit2, L
 import { Plan, Todo } from '@/types';
 import { getPriorityColor } from '@/lib/utils';
 import ConfirmModal from '@/components/ConfirmModal';
+import PullToRefresh from '@/components/PullToRefresh';
 
 interface TodoListProps {
+  onRefresh: () => void | Promise<void>;
   plan: Plan;
   activeTodos: Todo[];
   completedTodos: Todo[];
@@ -30,6 +32,7 @@ interface TodoListProps {
 }
 
 export default function TodoList({
+  onRefresh,
   plan,
   activeTodos,
   completedTodos,
@@ -186,7 +189,7 @@ export default function TodoList({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto">
+      <PullToRefresh onRefresh={onRefresh} className="flex-1">
       <div className="p-6 md:p-8 w-full mx-auto">
 
         {/* Editable Title */}
@@ -325,7 +328,7 @@ export default function TodoList({
           </div>
         )}
       </div>
-      </div>{/* end scrollable */}
+      </PullToRefresh>{/* end scrollable */}
 
       {/* Add Task Input — pinned to the bottom of the panel */}
       <div className="shrink-0 border-t border-gray-100 bg-white/90 backdrop-blur-sm p-4 md:px-8">
