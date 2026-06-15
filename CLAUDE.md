@@ -107,6 +107,8 @@ Call 1 **never emits JSON**. When it reaches Phase 3, `handleSendMessage` fires 
 |---|---|---|
 | `/api/auth/[...nextauth]` | GET, POST | NextAuth handler |
 | `/api/auth/register` | POST | Create user account |
+| `/api/profile` | GET, PATCH | Read account details + task stats / update display name |
+| `/api/profile/password` | PUT | Change password (credentials accounts only) |
 | `/api/chat` | POST | Proxy to DeepSeek |
 | `/api/plans` | GET, POST | List/create plans (scoped to user) |
 | `/api/plans/[id]` | PUT, DELETE | Rename/delete plan |

@@ -2,6 +2,7 @@
 
 import { X, Plus, ListTodo, Trash2, LayoutDashboard, CalendarDays, LogOut, Sun } from 'lucide-react';
 import { useSession, signOut } from 'next-auth/react';
+import Link from 'next/link';
 import { Plan } from '@/types';
 import logo from '@/public/logo.png';
 
@@ -129,12 +130,18 @@ export default function Sidebar({
           <Plus className="w-4 h-4" /> New Plan
         </button>
 
-        {/* User info + sign out */}
-        <div className="flex items-center gap-2 px-1">
-          <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
-            {initials || '?'}
-          </div>
-          <span className="text-xs text-gray-600 truncate flex-1">{userName}</span>
+        {/* User info (→ profile) + sign out */}
+        <div className="flex items-center gap-2">
+          <Link
+            href="/profile"
+            title="View profile"
+            className="group flex items-center gap-2 flex-1 min-w-0 px-1 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+              {initials || '?'}
+            </div>
+            <span className="text-xs text-gray-600 group-hover:text-gray-900 truncate flex-1 transition-colors">{userName}</span>
+          </Link>
           <button
             onClick={() => signOut({ callbackUrl: '/login' })}
             title="Sign out"

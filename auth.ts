@@ -44,7 +44,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    async jwt({ token, user, account }) {
+    async jwt({ token, user, account, trigger, session }) {
+      // Client called `useSession().update({ name })` — merge it into the token
+      // so the new display name propagates without a full re-login.
+      if (trigger === 'update' && typeof session?.name === 'string' && session.name.trim()) {
+        token.name = session.name.trim();
+      }
+
       if (account?.provider === 'credentials' && user?.id) {
         token.id = user.id;
       }
