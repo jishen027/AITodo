@@ -45,13 +45,18 @@ export default function ChatPanel({ chat, isTyping, streamingText, inputMessage,
   }, [isTyping, visible]);
 
   // Auto-grow the textarea to fit its content, capped so it never eats the
-  // whole panel. Re-runs as the text (and so the row count) changes.
+  // whole panel. Re-runs as the text changes, and when the panel becomes
+  // visible again (e.g. switching to the Chat tab on mobile).
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
+    // When the panel is hidden (mobile Tasks tab active), the textarea isn't
+    // laid out so scrollHeight is 0 — measuring then would collapse it to
+    // nothing. Skip until it's actually rendered.
+    if (el.offsetParent === null) return;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, [inputMessage]);
+  }, [inputMessage, visible]);
 
   const submit = () => {
     if (isTyping || !inputMessage.trim()) return;
