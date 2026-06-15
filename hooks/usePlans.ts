@@ -712,14 +712,21 @@ If nothing is worth suggesting, respond with exactly: []`;
         const planTitle = parsed.planTitle;
         const knownIds = new Set(currentTodos.map((t) => t.id));
 
+        // flushSync forces the functional updater to run synchronously so
+        // `committedTodos` is populated before we persist below. Without it the
+        // updater is queued for a later render and `committedTodos` is still null
+        // when persistTodos is reached — the AI update shows in the UI but never
+        // reaches the DB, so it vanishes on refresh.
         let committedTodos: Todo[] | null = null;
-        setPlans((prev) =>
-          prev.map((p) => {
-            if (p.id !== planId) return p;
-            const todos = reconcileTodos(aiTodos, p.todos, knownIds);
-            committedTodos = todos;
-            return { ...p, ...(planTitle ? { title: planTitle } : {}), todos };
-          })
+        flushSync(() =>
+          setPlans((prev) =>
+            prev.map((p) => {
+              if (p.id !== planId) return p;
+              const todos = reconcileTodos(aiTodos, p.todos, knownIds);
+              committedTodos = todos;
+              return { ...p, ...(planTitle ? { title: planTitle } : {}), todos };
+            })
+          )
         );
 
         // Highlight newly-added tasks for the entry animation.
