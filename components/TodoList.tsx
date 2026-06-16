@@ -160,7 +160,7 @@ export default function TodoList({
   }, [pendingDeleteId, onDeleteTodo]);
 
   return (
-    <section className="flex-1 md:flex-none md:w-[45%] flex flex-col bg-[#FAFAFA] border-r border-gray-200 relative overflow-hidden">
+    <section className="flex-1 flex flex-col bg-[#FAFAFA] border-r border-gray-200 relative overflow-hidden">
 
       {/* AI updating overlay */}
       {isAiUpdating && (

@@ -12,3 +12,57 @@
     font-size: 16px !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Scrollbars — slim, rounded, and subtle. Only customised on devices with a
+   fine pointer (desktop); touch devices keep their native overlay scrollbars.
+   The thumb is transparent until you hover the scrollable area, so it stays
+   out of the way until needed.
+--------------------------------------------------------------------------- */
+@media (pointer: fine) {
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  *:hover,
+  *:focus-within {
+    scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
+  }
+
+  /* WebKit / Chromium / Safari */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 9999px;
+    /* Padding around the thumb via a transparent border, so it reads as slim. */
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.2s ease;
+  }
+  /* Reveal the thumb when the scroll container (or an ancestor) is hovered. */
+  :hover::-webkit-scrollbar-thumb,
+  :focus-within::-webkit-scrollbar-thumb {
+    background-color: rgba(100, 116, 139, 0.35);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(100, 116, 139, 0.55);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+/* Opt-out helper for any element that should hide its scrollbar entirely. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

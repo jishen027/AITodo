@@ -65,6 +65,9 @@ export default function Home() {
   const [currentView, setCurrentView] = useState<View>('myday');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [mobilePlanTab, setMobilePlanTab] = useState<'tasks' | 'chat'>('tasks');
+  // Desktop only: whether the AI chat side panel is open. It slides in/out; on
+  // mobile the chat is reached via the tab bar instead, so this is ignored there.
+  const [isChatOpen, setIsChatOpen] = useState(true);
 
   // Mobile: swipe right from the left edge opens the nav menu.
   const edgeSwipe = useSwipe({
@@ -236,19 +239,44 @@ export default function Home() {
               />
             </div>
 
-            {/* Chat panel container — hidden on mobile when tasks tab is active */}
-            <section className={`${mobilePlanTab === 'tasks' ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-white md:min-h-0 relative`}>
-              <ChatPanel
-                chat={activePlan.chat}
-                isTyping={isTyping}
-                streamingText={streamingText}
-                inputMessage={inputMessage}
-                visible={!selectedTodoId}
-                planTitle={activePlan.title}
-                onInputChange={setInputMessage}
-                onSend={handleSendMessage}
-              />
+            {/* Chat panel container — hidden on mobile when tasks tab is active.
+                On desktop it slides in/out by animating its width; the inner is a
+                fixed-width box pinned to the right so the chat content doesn't
+                reflow during the animation. */}
+            <section
+              className={`
+                ${mobilePlanTab === 'tasks' ? 'hidden md:flex' : 'flex flex-1'}
+                md:flex-none flex-col bg-white md:min-h-0 relative overflow-hidden shrink-0
+                md:transition-[width] md:duration-300 md:ease-in-out
+                ${isChatOpen ? 'md:w-[24rem] lg:w-[30rem] xl:w-[34rem]' : 'md:w-0'}
+              `}
+            >
+              <div className="absolute inset-0 md:left-auto md:right-0 md:w-[24rem] lg:w-[30rem] xl:w-[34rem] md:border-l md:border-gray-100">
+                <ChatPanel
+                  chat={activePlan.chat}
+                  isTyping={isTyping}
+                  streamingText={streamingText}
+                  inputMessage={inputMessage}
+                  visible={!selectedTodoId}
+                  planTitle={activePlan.title}
+                  onInputChange={setInputMessage}
+                  onSend={handleSendMessage}
+                  onClose={() => setIsChatOpen(false)}
+                />
+              </div>
             </section>
+
+            {/* Desktop reopen tab — appears at the right edge once the chat is collapsed */}
+            {!isChatOpen && (
+              <button
+                onClick={() => setIsChatOpen(true)}
+                title="Open AI Assistant"
+                aria-label="Open AI Assistant"
+                className="hidden md:flex items-center justify-center absolute right-0 top-1/2 -translate-y-1/2 z-20 w-10 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-l-xl shadow-lg transition-colors"
+              >
+                <MessageSquare className="w-5 h-5" />
+              </button>
+            )}
           </>
         ) : null}
 

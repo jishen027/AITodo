@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { MessageSquare, Bot, User, Send } from 'lucide-react';
+import { MessageSquare, Bot, User, Send, PanelRightClose } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChatMessage } from '@/types';
@@ -15,9 +15,10 @@ interface ChatPanelProps {
   planTitle: string;
   onInputChange: (v: string) => void;
   onSend: () => void;
+  onClose?: () => void;
 }
 
-export default function ChatPanel({ chat, isTyping, streamingText, inputMessage, visible, planTitle, onInputChange, onSend }: ChatPanelProps) {
+export default function ChatPanel({ chat, isTyping, streamingText, inputMessage, visible, planTitle, onInputChange, onSend, onClose }: ChatPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // True while an IME composition is active (e.g. typing Chinese/Japanese) — we
@@ -80,6 +81,16 @@ export default function ChatPanel({ chat, isTyping, streamingText, inputMessage,
         <span className="hidden md:block absolute left-0 right-0 text-center text-sm font-semibold text-gray-800 truncate px-32 pointer-events-none">
           {planTitle}
         </span>
+        {onClose && (
+          <button
+            onClick={onClose}
+            title="Close AI Assistant"
+            aria-label="Close AI Assistant"
+            className="hidden md:flex ml-auto relative z-10 p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <PanelRightClose className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
