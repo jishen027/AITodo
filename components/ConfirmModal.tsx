@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { gsap } from 'gsap';
 import { AlertTriangle } from 'lucide-react';
 
@@ -21,6 +22,12 @@ export default function ConfirmModal({
 }: ConfirmModalProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  // Portal to <body> so the modal centers on the viewport, not inside any
+  // transformed ancestor (e.g. the sliding sidebar, which becomes the containing
+  // block for fixed-position descendants). Mount-gated for SSR safety.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Entrance animation
   useEffect(() => {
@@ -44,7 +51,9 @@ export default function ConfirmModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onConfirm, onCancel]);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
@@ -84,6 +93,7 @@ export default function ConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

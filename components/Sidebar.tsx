@@ -5,6 +5,7 @@ import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Plan } from '@/types';
+import ConfirmModal from '@/components/ConfirmModal';
 import logo from '@/public/logo.png';
 
 type View = 'myday' | 'plans' | 'calendar';
@@ -46,6 +47,10 @@ export default function Sidebar({
   // Profile dropdown (Profile / Personal Context / Sign out)
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Plan deletion confirmation — mirrors the todo delete flow.
+  const [pendingDeletePlanId, setPendingDeletePlanId] = useState<string | null>(null);
+  const pendingDeletePlan = plans.find((p) => p.id === pendingDeletePlanId);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -134,7 +139,7 @@ export default function Sidebar({
               <span className="truncate text-sm font-medium">{plan.title}</span>
             </div>
             <button
-              onClick={(e) => { e.stopPropagation(); onDeletePlan(plan.id); }}
+              onClick={(e) => { e.stopPropagation(); setPendingDeletePlanId(plan.id); }}
               className="md:opacity-0 md:group-hover:opacity-100 p-2 text-gray-400 hover:text-red-500 rounded transition flex-shrink-0"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -197,6 +202,23 @@ export default function Sidebar({
           </button>
         </div>
       </div>
+
+      {/* Delete plan confirmation modal */}
+      {pendingDeletePlanId && (
+        <ConfirmModal
+          title="Delete plan?"
+          message={
+            pendingDeletePlan
+              ? `"${pendingDeletePlan.title}" and all its tasks will be permanently removed.`
+              : 'This plan and all its tasks will be permanently removed.'
+          }
+          onConfirm={() => {
+            onDeletePlan(pendingDeletePlanId);
+            setPendingDeletePlanId(null);
+          }}
+          onCancel={() => setPendingDeletePlanId(null)}
+        />
+      )}
     </aside>
   );
 }
