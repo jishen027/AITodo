@@ -88,4 +88,9 @@ async function createSchema() {
     ALTER TABLE todos ADD COLUMN IF NOT EXISTS my_day BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS is_my_day BOOLEAN NOT NULL DEFAULT FALSE;
   `);
+  // User-specific context (address, personal details, preferences) fed to the AI
+  // assistant so it can tailor generated plans.
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS personal_context TEXT NOT NULL DEFAULT '';
+  `);
 }

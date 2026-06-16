@@ -103,6 +103,10 @@ Call 1 (the conversation) drives a state machine via a control token:
 
 Call 1 **never emits JSON**. When it reaches Phase 3, `handleSendMessage` fires **Call 2** (`buildPlanInstruction`), which returns an incremental delta (`upsert` + `remove`) of the incomplete tasks only. This is the only call that produces plan data.
 
+### Personal context
+
+Users can store a free-form **personal context** (location/address, schedule, preferences, constraints) on the `/profile/context` page, reached from the profile dropdown menu in the `Sidebar` footer (or a card on `/profile`). It is persisted in `users.personal_context` (TEXT, max 4000 chars) via `GET/PUT /api/profile/context`. `usePlans` loads it on mount (and re-fetches on window focus) and injects it via `personalContextSection()` into **both** AI calls (`buildChatInstruction`, `buildPlanInstruction`) and the My Day suggestion prompt, so generated plans are tailored to the user without them repeating themselves.
+
 ### API routes
 
 | Route | Methods | Purpose |
@@ -111,6 +115,7 @@ Call 1 **never emits JSON**. When it reaches Phase 3, `handleSendMessage` fires 
 | `/api/auth/register` | POST | Create user account |
 | `/api/profile` | GET, PATCH | Read account details + task stats / update display name |
 | `/api/profile/password` | PUT | Change password (credentials accounts only) |
+| `/api/profile/context` | GET, PUT | Read/replace the user's personal context (max 4000 chars) |
 | `/api/chat` | POST | Proxy to DeepSeek |
 | `/api/plans` | GET, POST | List/create plans (scoped to user) |
 | `/api/plans/[id]` | PUT, DELETE | Rename/delete plan |

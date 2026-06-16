@@ -6,7 +6,7 @@ import { useSession, signOut } from 'next-auth/react';
 import logo from '@/public/logo.png';
 import {
   ArrowLeft, User, Mail, CalendarDays, Layers, CheckCircle2, Circle,
-  Check, X, Loader2, LogOut, KeyRound, ShieldCheck,
+  Check, X, Loader2, LogOut, KeyRound, ShieldCheck, Sparkles, ChevronRight,
 } from 'lucide-react';
 
 interface Profile {
@@ -209,6 +209,23 @@ export default function ProfilePage() {
               <StatCard icon={<CheckCircle2 className="w-5 h-5" />} label="Completed" value={profile.stats.completedTasks} />
               <StatCard icon={<CalendarDays className="w-5 h-5" />} label="Total tasks" value={profile.stats.totalTasks} />
             </section>
+
+            {/* Personal context — drives AI plan tailoring */}
+            <Link
+              href="/profile/context"
+              className="group flex items-center gap-4 bg-white rounded-2xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition"
+            >
+              <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900">Personal context</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Tell the AI about your location, schedule, and preferences so it tailors your plans.
+                </p>
+              </div>
+              <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-indigo-500 transition shrink-0" />
+            </Link>
 
             {/* Account details */}
             <section className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">

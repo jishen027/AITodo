@@ -27,8 +27,23 @@ function planContext(activePlan: Plan, allPlans: Plan[]) {
   return { today, completedCount, pendingCount, overdueCount, incompleteTodos, completedTodos };
 }
 
+// Renders the user's saved personal context as a prompt section, or '' when empty.
+// Injected into every AI call so plans are tailored to the user's life (home base,
+// schedule, preferences, constraints) without them repeating it each conversation.
+function personalContextSection(personalContext: string): string {
+  const trimmed = personalContext.trim();
+  if (!trimmed) return '';
+  return `
+# About the user (personal context they provided)
+Use this to tailor the plan — infer locations, realistic timing, and constraints from it. Never contradict it. Do not repeat it back verbatim unless relevant.
+${trimmed}
+
+---
+`;
+}
+
 // Call 1 — conversation. Markdown only, never JSON.
-function buildChatInstruction(activePlan: Plan, allPlans: Plan[]): string {
+function buildChatInstruction(activePlan: Plan, allPlans: Plan[], personalContext: string): string {
   const { today, completedCount, pendingCount, overdueCount, incompleteTodos, completedTodos } =
     planContext(activePlan, allPlans);
   const hasExistingTodos = incompleteTodos.length > 0 || completedTodos.length > 0;
@@ -48,7 +63,7 @@ NEVER output JSON or code blocks — a separate system step converts the plan in
 # Global Stats: ${completedCount} tasks completed · ${pendingCount} pending · ${overdueCount} overdue
 
 ---
-
+${personalContextSection(personalContext)}
 # ACTIVE PLAN: "${activePlan.title}"
 
 ## Current incomplete tasks:
@@ -81,7 +96,7 @@ Output EXACTLY ONE control token on its own final line at the end of EVERY reply
 }
 
 // Call 2 — plan generation. JSON only, no prose. Invoked only on CONFIRMED.
-function buildPlanInstruction(activePlan: Plan, allPlans: Plan[]): string {
+function buildPlanInstruction(activePlan: Plan, allPlans: Plan[], personalContext: string): string {
   const { today, incompleteTodos, completedTodos } = planContext(activePlan, allPlans);
 
   return `
@@ -89,7 +104,7 @@ function buildPlanInstruction(activePlan: Plan, allPlans: Plan[]): string {
 You convert the conversation above into the plan's editable task list as JSON. Output JSON ONLY — no prose, no Markdown, no code fences, no explanation.
 
 # Current Date: ${today}
-
+${personalContextSection(personalContext)}
 # ACTIVE PLAN: "${activePlan.title}"
 
 ## EDITABLE Todos — you MAY add, modify, reschedule, or remove any of these:
@@ -408,6 +423,10 @@ export function usePlans() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // The user's saved personal context, injected into every AI call so plans are
+  // tailored to them. Loaded on mount and refreshed when the window regains focus
+  // (the user may have just edited it on the profile page).
+  const [personalContext, setPersonalContext] = useState('');
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [inputMessage, setInputMessage] = useState('');
   const [typingPlanIds, setTypingPlanIds] = useState<Record<string, boolean>>({});
@@ -452,6 +471,24 @@ export function usePlans() {
       .catch(console.error)
       .finally(() => setIsLoading(false));
   }, [loadPlans]);
+
+  // Load the user's personal context on mount, and re-load when the tab regains
+  // focus so an edit made on the profile page is picked up without a full reload.
+  useEffect(() => {
+    const loadContext = () => {
+      fetch('/api/profile/context')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data && typeof data.personalContext === 'string') {
+            setPersonalContext(data.personalContext);
+          }
+        })
+        .catch(console.error);
+    };
+    loadContext();
+    window.addEventListener('focus', loadContext);
+    return () => window.removeEventListener('focus', loadContext);
+  }, []);
 
   // Re-fetch plans on demand (pull-to-refresh). Swallows errors so the pull
   // indicator always resolves, and holds the spinner briefly so a near-instant
@@ -680,7 +717,7 @@ export function usePlans() {
 
       const system = `You are a focused daily-planning assistant inside a todo app.
 Today's date is ${today}.
-The user message is a JSON array of their PENDING tasks (none are in "My Day" yet). Each task has: id, text, plan, dueDate, dueTime, location, priority.
+${personalContextSection(personalContext)}The user message is a JSON array of their PENDING tasks (none are in "My Day" yet). Each task has: id, text, plan, dueDate, dueTime, location, priority.
 
 Choose the tasks the user should focus on TODAY. Include two kinds of task:
 A) Time-sensitive tasks, prioritised in this order:
@@ -750,7 +787,7 @@ If nothing is worth suggesting, respond with exactly: []`;
     ];
 
     // --- Call 1: conversational reply (Markdown only, never JSON) ---
-    const chatInstruction = buildChatInstruction(activePlan, plans);
+    const chatInstruction = buildChatInstruction(activePlan, plans, personalContext);
     const rawReply = await callChatStream(history, chatInstruction, (chunk) => {
       flushSync(() => setStreamingTexts((prev) => ({ ...prev, [planId]: (prev[planId] ?? '') + chunk })));
     });
@@ -794,7 +831,7 @@ If nothing is worth suggesting, respond with exactly: []`;
       // Lock plan editing while the JSON delta is generated — the UI shows
       // "AI is updating your plan." so the user can't race the AI's write.
       setUpdatingPlanIds((prev) => ({ ...prev, [planId]: true }));
-      const planInstruction = buildPlanInstruction(activePlan, plans);
+      const planInstruction = buildPlanInstruction(activePlan, plans, personalContext);
       const planHistory: ApiMessage[] = [
         ...history,
         { role: 'assistant', content: chatText },

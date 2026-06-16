@@ -1,8 +1,9 @@
 'use client';
 
-import { X, Plus, ListTodo, Trash2, LayoutDashboard, CalendarDays, LogOut, Sun } from 'lucide-react';
+import { X, Plus, ListTodo, Trash2, LayoutDashboard, CalendarDays, LogOut, Sun, User, Sparkles, ChevronUp } from 'lucide-react';
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
+import { useEffect, useRef, useState } from 'react';
 import { Plan } from '@/types';
 import logo from '@/public/logo.png';
 
@@ -41,6 +42,26 @@ export default function Sidebar({
     .join('')
     .toUpperCase()
     .slice(0, 2);
+
+  // Profile dropdown (Profile / Personal Context / Sign out)
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
 
   return (
     <aside
@@ -130,24 +151,49 @@ export default function Sidebar({
           <Plus className="w-4 h-4" /> New Plan
         </button>
 
-        {/* User info (→ profile) + sign out */}
-        <div className="flex items-center gap-2">
-          <Link
-            href="/profile"
-            title="View profile"
-            className="group flex items-center gap-2 flex-1 min-w-0 px-1 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+        {/* User menu — profile, personal context, sign out */}
+        <div className="relative" ref={menuRef}>
+          {menuOpen && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden py-1 z-40">
+              <Link
+                href="/profile"
+                onClick={() => setMenuOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <User className="w-4 h-4 text-gray-400" />
+                Profile
+              </Link>
+              <Link
+                href="/profile/context"
+                onClick={() => setMenuOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <Sparkles className="w-4 h-4 text-indigo-500" />
+                Personal Context
+              </Link>
+              <div className="my-1 border-t border-gray-100" />
+              <button
+                onClick={() => signOut({ callbackUrl: '/login' })}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-600 transition-colors"
+              >
+                <LogOut className="w-4 h-4 text-gray-400" />
+                Sign out
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={() => setMenuOpen((o) => !o)}
+            title="Account menu"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            className="w-full flex items-center gap-2 px-1 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
           >
             <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
               {initials || '?'}
             </div>
-            <span className="text-xs text-gray-600 group-hover:text-gray-900 truncate flex-1 transition-colors">{userName}</span>
-          </Link>
-          <button
-            onClick={() => signOut({ callbackUrl: '/login' })}
-            title="Sign out"
-            className="p-1 text-gray-400 hover:text-red-500 rounded transition flex-shrink-0"
-          >
-            <LogOut className="w-4 h-4" />
+            <span className="text-xs text-gray-600 truncate flex-1 text-left">{userName}</span>
+            <ChevronUp className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${menuOpen ? '' : 'rotate-180'}`} />
           </button>
         </div>
       </div>
