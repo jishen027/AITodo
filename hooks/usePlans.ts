@@ -617,7 +617,10 @@ export function usePlans() {
     const todo = plan.todos.find((t) => t.id === todoId);
     if (!todo) return;
     const newCompleted = !todo.completed;
-    updateTodos(plan.id, plan.todos.map((t) => (t.id === todoId ? { ...t, completed: newCompleted } : t)));
+    // Mirror the server's completed_at stamping so "completed today" filters work
+    // immediately, without waiting for a refetch.
+    const completedAt = newCompleted ? new Date().toISOString() : null;
+    updateTodos(plan.id, plan.todos.map((t) => (t.id === todoId ? { ...t, completed: newCompleted, completedAt } : t)));
     fetch(`/api/plans/${plan.id}/todos/${todoId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

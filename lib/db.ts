@@ -88,6 +88,10 @@ async function createSchema() {
     ALTER TABLE todos ADD COLUMN IF NOT EXISTS my_day BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE plans ADD COLUMN IF NOT EXISTS is_my_day BOOLEAN NOT NULL DEFAULT FALSE;
   `);
+  // When a task was completed — used to show "completed today" in My Day.
+  await pool.query(`
+    ALTER TABLE todos ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+  `);
   // User-specific context (address, personal details, preferences) fed to the AI
   // assistant so it can tailor generated plans.
   await pool.query(`

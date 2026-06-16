@@ -26,10 +26,13 @@ export async function PUT(
     await client.query('DELETE FROM todos WHERE plan_id = $1', [planId]);
     for (let i = 0; i < todos.length; i++) {
       const t = todos[i];
+      // Preserve an explicit completedAt; otherwise stamp NOW() for a task that's
+      // completed but has no timestamp yet, and NULL for incomplete tasks.
+      const completedAt = t.completed ? (t.completedAt ?? new Date().toISOString()) : null;
       await client.query(
-        `INSERT INTO todos (id, plan_id, text, completed, notes, due_date, due_time, priority, location, location_lat, location_lng, my_day, created_at, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), $14)`,
-        [t.id, planId, t.text, t.completed, t.notes, t.dueDate, t.dueTime, t.priority, t.location ?? '', t.locationLat ?? null, t.locationLng ?? null, t.myDay ?? false, t.createdAt ?? null, i]
+        `INSERT INTO todos (id, plan_id, text, completed, notes, due_date, due_time, priority, location, location_lat, location_lng, my_day, created_at, completed_at, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), $14::timestamptz, $15)`,
+        [t.id, planId, t.text, t.completed, t.notes, t.dueDate, t.dueTime, t.priority, t.location ?? '', t.locationLat ?? null, t.locationLng ?? null, t.myDay ?? false, t.createdAt ?? null, completedAt, i]
       );
       for (let j = 0; j < (t.steps ?? []).length; j++) {
         const s = t.steps[j];

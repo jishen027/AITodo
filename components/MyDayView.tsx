@@ -118,7 +118,13 @@ export default function MyDayView({
   const panelSwipe = useSwipe({ onSwipeLeft: () => setShowPanel(false) });
 
   const activeTodos = myDayTodos.filter((t) => !t.completed);
-  const completedTodos = myDayTodos.filter((t) => t.completed);
+  // Only surface tasks completed *today* (local time). Tasks completed on an
+  // earlier day — or before completion timestamps were tracked — drop off so the
+  // list stays focused on today's progress.
+  const completedTodayCutoff = new Date().toDateString();
+  const completedTodos = myDayTodos.filter(
+    (t) => t.completed && t.completedAt && new Date(t.completedAt).toDateString() === completedTodayCutoff
+  );
 
   const today = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
@@ -230,7 +236,7 @@ export default function MyDayView({
           {/* Completed Todos */}
           {completedTodos.length > 0 && (
             <div>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 px-2">Completed</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 px-2">Completed today</h3>
               <div className="space-y-2">
                 {completedTodos.map((todo) => (
                   <div

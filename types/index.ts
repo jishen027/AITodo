@@ -20,6 +20,7 @@ export interface Todo {
   locationLng?: number | null;
   myDay?: boolean;
   createdAt?: string;
+  completedAt?: string | null;
 }
 
 export interface ChatMessage {

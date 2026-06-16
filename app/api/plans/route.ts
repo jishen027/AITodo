@@ -14,7 +14,7 @@ export async function GET(request: Request) {
       pool.query('SELECT id, title, is_my_day FROM plans WHERE user_id = $1 ORDER BY created_at ASC', [userId]),
       pool.query(
         `SELECT t.id, t.plan_id, t.text, t.completed, t.notes, t.due_date, t.due_time, t.priority,
-                t.location, t.location_lat, t.location_lng, t.my_day, t.created_at, t.sort_order
+                t.location, t.location_lat, t.location_lng, t.my_day, t.created_at, t.completed_at, t.sort_order
          FROM todos t JOIN plans p ON p.id = t.plan_id WHERE p.user_id = $1 ORDER BY t.plan_id, t.sort_order ASC`,
         [userId]
       ),
@@ -55,6 +55,7 @@ export async function GET(request: Request) {
         locationLng: r.location_lng,
         myDay: r.my_day,
         createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+        completedAt: r.completed_at instanceof Date ? r.completed_at.toISOString() : r.completed_at,
         steps: stepsByTodo.get(r.id) ?? [],
       });
       todosByPlan.set(r.plan_id, list);

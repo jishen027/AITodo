@@ -22,7 +22,12 @@ export async function PATCH(
     let idx = 1;
 
     if (updates.text !== undefined)      { fields.push(`text = $${idx++}`);      values.push(updates.text); }
-    if (updates.completed !== undefined) { fields.push(`completed = $${idx++}`); values.push(updates.completed); }
+    if (updates.completed !== undefined) {
+      fields.push(`completed = $${idx++}`); values.push(updates.completed);
+      // Stamp completion time when completing, clear it when re-opening. The
+      // literal NOW()/NULL are safe (no user input) so they're not parameterised.
+      fields.push(`completed_at = ${updates.completed ? 'NOW()' : 'NULL'}`);
+    }
     if (updates.notes !== undefined)     { fields.push(`notes = $${idx++}`);     values.push(updates.notes); }
     if (updates.dueDate !== undefined)   { fields.push(`due_date = $${idx++}`);  values.push(updates.dueDate); }
     if (updates.dueTime !== undefined)   { fields.push(`due_time = $${idx++}`);  values.push(updates.dueTime); }
