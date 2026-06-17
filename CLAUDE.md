@@ -38,8 +38,12 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=...  # optional — enables map + place autocomp
 types/index.ts               ← shared types: Todo, Plan, ChatMessage, Step, Priority
 hooks/usePlans.ts            ← single source of truth for all state + AI agent logic + DB persistence
 app/page.tsx                 ← root layout, wires hook to components
-app/api/chat/route.ts        ← Next.js Route Handler, calls DeepSeek via OpenAI SDK
-lib/api.ts                   ← thin fetch wrapper (callChat)
+app/api/chat/route.ts        ← Route Handler — Call 1 conversation via Vercel AI SDK streamText
+app/api/plan/route.ts        ← Route Handler — Call 2 plan delta via streamObject + Zod
+app/api/suggestions/route.ts ← Route Handler — My Day suggestions via generateObject + Zod
+lib/ai.ts                    ← DeepSeek provider factory (@ai-sdk/deepseek)
+lib/schemas.ts               ← Zod schemas (planDeltaSchema, suggestionsSchema) + inferred types
+lib/api.ts                   ← client helpers: callChatStream (text), generatePlanDelta, generateSuggestions
 lib/utils.ts                 ← generateId, formatYMD, getPriorityColor
 lib/db.ts                    ← pg Pool singleton + lazy schema init (CREATE TABLE IF NOT EXISTS)
 auth.config.ts               ← Edge-compatible NextAuth config, used by middleware
@@ -58,6 +62,8 @@ middleware.ts                ← protects all page routes, redirects unauthentic
 `lib/db.ts` exports a `pg.Pool` singleton (dev-safe global to survive hot-reloads) and `ensureReady()`, a lazy initialiser that runs `CREATE TABLE IF NOT EXISTS` once per server process. Every API route calls `await ensureReady()` before touching the DB.
 
 Tables: `users`, `plans` (has `user_id` FK), `todos`, `steps`, `chat_messages`.
+
+Drag-to-reorder ordering is persisted two ways: within a plan, the active task order is the array order written to `todos.sort_order` by the bulk `PUT /api/plans/[id]/todos` (and read back via `ORDER BY sort_order`); the **My Day** view spans plans, so it has its own `todos.my_day_order` column, written by `PUT /api/todos/myday-order`. The shared, dependency-free drag mechanic lives in `hooks/useDragReorder.ts` (pointer events → works on mouse + touch); `usePlans` exposes `reorderTodos(planId, ids)` and `reorderMyDay(ids)`.
 
 All plan data is scoped to the authenticated user — `GET /api/plans` filters by `user_id`, `POST /api/plans` inserts with `user_id`.
 
@@ -78,19 +84,18 @@ All business logic lives here. Key internals:
 - Loads plans from `GET /api/plans` on mount; starts with `plans = []` and `isLoading = true`.
 - The AI agent runs as **two separate calls** so each output is single-purpose (conversation vs. data). No response ever mixes prose and JSON.
 - `buildChatInstruction(activePlan, allPlans)` — **Call 1** system prompt: the conversational reply, **Markdown only, never JSON**. Drives the phase via a control token (ASKING / PROPOSED / CONFIRMED). Gets a compact view of the **incomplete** tasks plus a locked-task **count** (completed tasks' contents are never sent to the chat).
-- `buildPlanInstruction(activePlan, allPlans)` — **Call 2** system prompt: invoked only when Call 1 returns CONFIRMED. Returns an **incremental delta as JSON only** — `{ planTitle?, upsert[], remove[] }`, where `upsert` is the incomplete tasks that are new/changed and `remove` is ids to delete. Sees only the EDITABLE (incomplete) todos plus a count of hidden completed ones; never re-emits the whole plan and never touches completed tasks.
+- `buildPlanInstruction(activePlan, allPlans)` — **Call 2** system prompt: invoked only when Call 1 returns CONFIRMED. Describes the BEHAVIOUR of an **incremental delta** — `{ planTitle?, upsert[], remove[] }`, where `upsert` is the incomplete tasks that are new/changed and `remove` is ids to delete. The **shape** is enforced by `planDeltaSchema` (`lib/schemas.ts`) via the AI SDK's `generateObject`, so the prompt no longer has to describe the JSON format. Sees only the EDITABLE (incomplete) todos plus a count of hidden completed ones; never re-emits the whole plan and never touches completed tasks.
 - `planContext(activePlan, allPlans)` — shared helper both builders use (date, global stats, incomplete/completed todo split).
-- `extractJsonBlock(responseText)` — pulls JSON from a reply: prefers a fenced ```json block, falls back to the outermost `{}`/`[]` span (handles unfenced JSON).
-- `salvageObjectArray(text, key)` — best-effort recovery for truncated JSON: scans the named array (`upsert`) and returns every **complete** `{...}` object, discarding a cut-off trailing element. Lets a length-truncated response still apply the tasks that arrived.
-- `parsePlanUpdate(responseText)` — runs `extractJsonBlock`, parses, and returns the **raw** `{ text, upsert, remove, planTitle }` (`upsert: null` only when nothing parseable was recovered). On a JSON parse failure it falls back to `salvageObjectArray`. Does **not** reconcile (that's deferred to commit time). Also tolerates a legacy full-array reply by reading `todos` as `upsert`.
+- **Structured outputs** — Call 2 (`POST /api/plan`) **streams** the plan delta with `streamObject`, and My Day suggestions (`POST /api/suggestions`) use `generateObject`, both constrained by Zod schemas (`planDeltaSchema`, `suggestionsSchema`). Call 2 streams because this model can take 60s+ to build a rich plan — a continuous byte flow keeps the long request alive (a silent non-streaming request gets killed by idle-timeout proxies / platform limits, so the plan would never land). This replaced the old hand-rolled `extractJsonBlock` / `salvageObjectArray` / `parsePlanUpdate` / `parseSuggestions` text-parsing helpers, the 3-attempt retry loop, and the `<<<TRUNCATED>>>` salvage path — all deleted.
 - `applyTodoDelta(upsert, remove, base, knownIds)` — applies the delta against the **latest** live todos (read inside the `setPlans` updater, not a send-time snapshot). Completed tasks are never modified or removed; unchanged incomplete tasks are kept verbatim (the AI doesn't re-send them); `remove` deletes named incomplete tasks; leftover upserts are added as new tasks unless the id was in `knownIds` but gone from `base` (user deleted it mid-request → not resurrected). `mergeUpsertTodo` restores `myDay`/coords/`createdAt` from the existing copy. Touching only named tasks sidesteps stale-array clobbering by construction.
-- `stripControlToken(text)` — removes `<<<ASKING>>>` / `<<<PROPOSED>>>` / `<<<CONFIRMED>>>` / `<<<TRUNCATED>>>` tokens from the displayed text and returns which control token was present.
+- `filterSuggestions(raw, validIds)` — drops My Day suggestions whose id is unknown or duplicated (the underlying task may have been completed/deleted between request and reply).
+- `stripControlToken(text)` — removes `<<<ASKING>>>` / `<<<PROPOSED>>>` / `<<<CONFIRMED>>>` tokens from the displayed Call 1 text and returns which control token was present.
 - `trimTrailingLeadIn(text)` — drops a dangling "here is the plan:" colon lead-in from the conversational reply.
 - `pendingProposalRef` — tracks whether the AI is in Phase 2 (plan proposed, awaiting approval). Used to fire Call 2 when the user approves but the model forgot the CONFIRMED token.
-- `handleSendMessage` — builds chat history from `activePlan.chat.slice(1)` (skips the opening greeting); streams Call 1 and shows it immediately; if CONFIRMED, runs Call 2 (delta JSON, up to 3 attempts) and applies it via `applyTodoDelta`. Persists chat + todos optimistically.
+- `handleSendMessage` — builds chat history from `activePlan.chat.slice(1)` (skips the opening greeting); streams Call 1 (`callChatStream`) and shows it immediately; if CONFIRMED, runs Call 2 (`generatePlanDelta`, which streams the schema-shaped delta) and applies it via `applyTodoDelta`. Persists chat + todos optimistically; on a failed generation it posts an honest "couldn't generate" message.
 - Two activity flags drive the UI: `isTyping` (`typingPlanIds`) is true for the whole exchange (set at the start of `handleSendMessage`); `isUpdatingPlan` (`updatingPlanIds`) is true **only while Call 2 runs**. `TodoList` locks editing (frosted overlay, "AI is updating your plan") on `isUpdatingPlan` so the conversation phase (Call 1) still allows manual todo edits — editing is blocked only during the JSON write.
 
-`app/api/chat/route.ts` sets `max_tokens: 8192` and appends a `<<<TRUNCATED>>>` sentinel when the model stops on `finish_reason === 'length'`, so the client can fail loudly instead of parsing a half-finished plan. Because Call 2 now emits only a delta (not the full plan), responses are far smaller and rarely hit this cap; if one is still truncated, `salvageObjectArray` recovers the complete tasks that arrived.
+`app/api/chat/route.ts` streams Call 1 with the AI SDK's `streamText` (`maxOutputTokens: 8192`) and returns `result.toTextStreamResponse()` — a plain UTF-8 text stream the client reads as-is. Call 2 (`/api/plan`) streams the schema-shaped JSON with `streamObject` → `toTextStreamResponse()`; the client (`generatePlanDelta`) accumulates the text and `JSON.parse`s the final object (a malformed/incomplete payload throws there and surfaces an honest fallback). Streaming both calls means no request sits silent long enough to be killed, and there is no half-finished-JSON salvage case, so the old `<<<TRUNCATED>>>` sentinel is gone.
 
 Every mutation (create/delete plan, rename, toggle/delete/add/edit todo, AI response) fires the appropriate API route optimistically — React state is updated first, then the fetch is dispatched.
 
@@ -116,18 +121,21 @@ Users can store a free-form **personal context** (location/address, schedule, pr
 | `/api/profile` | GET, PATCH | Read account details + task stats / update display name |
 | `/api/profile/password` | PUT | Change password (credentials accounts only) |
 | `/api/profile/context` | GET, PUT | Read/replace the user's personal context (max 4000 chars) |
-| `/api/chat` | POST | Proxy to DeepSeek |
+| `/api/chat` | POST | Call 1 — stream conversational reply (AI SDK `streamText`) |
+| `/api/plan` | POST | Call 2 — plan delta streamed as JSON (`streamObject` + `planDeltaSchema`) |
+| `/api/suggestions` | POST | My Day suggestions as validated JSON (`generateObject` + `suggestionsSchema`) |
 | `/api/plans` | GET, POST | List/create plans (scoped to user) |
 | `/api/plans/[id]` | PUT, DELETE | Rename/delete plan |
 | `/api/plans/[id]/todos` | PUT | Bulk-replace all todos for a plan |
 | `/api/plans/[id]/todos/[todoId]` | PATCH, DELETE | Update/delete single todo |
 | `/api/plans/[id]/chat` | POST | Append chat messages |
+| `/api/todos/myday-order` | PUT | Persist the user's manual My Day ordering (cross-plan) |
 
 All plan/todo/chat routes check `auth()` and return 401 if unauthenticated.
 
 ### DeepSeek integration
 
-`app/api/chat/route.ts` uses the `openai` npm package pointed at `https://api.deepseek.com`. The model defaults to `deepseek-chat` if `DEEPSEEK_MODEL` is not set.
+AI calls go through the **Vercel AI SDK** (`ai` + `@ai-sdk/deepseek`). `lib/ai.ts` builds the DeepSeek provider from `DEEPSEEK_API_KEY` (default endpoint `https://api.deepseek.com`); `chatModel()` resolves the model, defaulting to `deepseek-chat` when `DEEPSEEK_MODEL` is unset. Routes use `streamText` (conversation), `streamObject` (plan delta), and `generateObject` (My Day suggestions), all validated by the Zod schemas in `lib/schemas.ts`.
 
 ### Components
 

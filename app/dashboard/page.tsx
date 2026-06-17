@@ -55,6 +55,8 @@ export default function Home() {
     toggleTodo,
     deleteTodo,
     addTodoManual,
+    reorderTodos,
+    reorderMyDay,
     updateSelectedTodo,
     handleSendMessage,
     aiAddedTodoIds,
@@ -200,6 +202,7 @@ export default function Home() {
             onSelectTodo={setSelectedTodoId}
             onToggleTodo={toggleTodo}
             onRemoveFromMyDay={toggleMyDay}
+            onReorderMyDay={reorderMyDay}
             suggestions={myDaySuggestions}
             dueSoonTodos={dueSoonTodos}
             recentlyAddedTodos={recentlyAddedTodos}
@@ -231,6 +234,7 @@ export default function Home() {
                 onToggleTodo={toggleTodo}
                 onToggleMyDay={toggleMyDay}
                 onDeleteTodo={deleteTodo}
+                onReorderTodos={(ids) => reorderTodos(activePlan.id, ids)}
                 onAddTodo={addTodoManual}
                 onNewTaskTextChange={setNewTaskText}
                 onStartEditTitle={() => { setEditingTitleId(activePlan.id); setEditedTitle(activePlan.title); }}

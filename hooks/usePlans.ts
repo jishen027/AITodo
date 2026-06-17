@@ -4,7 +4,13 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { Plan, Todo, TodoWithPlan, MyDaySuggestion } from '@/types';
 import { generateId } from '@/lib/utils';
-import { callChat, callChatStream, type ApiMessage } from '@/lib/api';
+import {
+  callChatStream,
+  generatePlanDelta,
+  generateSuggestions,
+  type ApiMessage,
+} from '@/lib/api';
+import type { PlanDelta, UpsertTodo } from '@/lib/schemas';
 
 // ---------------------------------------------------------------------------
 // Agent System Instructions
@@ -95,13 +101,15 @@ Output EXACTLY ONE control token on its own final line at the end of EVERY reply
 `.trim();
 }
 
-// Call 2 — plan generation. JSON only, no prose. Invoked only on CONFIRMED.
+// Call 2 — plan generation. Returns a structured plan delta (the response shape
+// is enforced by planDeltaSchema via the AI SDK's generateObject, so this prompt
+// only has to describe the BEHAVIOUR, not the JSON format). Invoked only on CONFIRMED.
 function buildPlanInstruction(activePlan: Plan, allPlans: Plan[], personalContext: string): string {
   const { today, incompleteTodos, completedTodos } = planContext(activePlan, allPlans);
 
   return `
 # Role
-You convert the conversation above into the plan's editable task list as JSON. Output JSON ONLY — no prose, no Markdown, no code fences, no explanation.
+You convert the conversation above into the plan's editable task list, emitting ONLY a DELTA (what changed this turn) — never the whole plan.
 
 # Current Date: ${today}
 ${personalContextSection(personalContext)}
@@ -112,52 +120,29 @@ ${incompleteTodos.length > 0 ? JSON.stringify(incompleteTodos, null, 2) : '(no i
 
 # Note: ${completedTodos.length} completed task(s) are intentionally hidden. They are locked and preserved automatically — do NOT output them.
 
-# Output — emit ONLY a DELTA (what changed), not the whole plan. A SINGLE JSON object, nothing else:
-{
-  "planTitle": "optional — include only to rename the plan",
-  "upsert": [
-    {
-      "id": "keep the existing ID to MODIFY a task, or a short random ID for a NEW one",
-      "text": "Action-oriented title, max 60 chars",
-      "notes": "Rich detail: purpose · steps · acceptance criteria · resources · blockers · estimated duration. Never empty.",
-      "dueDate": "YYYY-MM-DD or empty string",
-      "dueTime": "HH:MM 24-hour or empty string — assign a realistic time of day",
-      "priority": "high | medium | low | none",
-      "location": "Place name or address where the task happens (e.g. 'PureGym Birmingham City Centre'), or empty string",
-      "steps": [
-        { "id": "step-id", "text": "Specific actionable step", "completed": false }
-      ]
-    }
-  ],
-  "remove": ["id of an existing incomplete task to delete"]
-}
-
 # Rules — INCREMENTAL UPDATES ONLY
 - "upsert" = ONLY the incomplete tasks that are NEW or that CHANGED in this turn. Include each such task in full.
-- "remove" = ids of existing incomplete tasks the user asked to delete. Omit or use [] if none.
+- "remove" = ids of existing incomplete tasks the user asked to delete. Use [] if none.
+- "planTitle" = include only to rename the plan; otherwise omit it.
 - DO NOT re-send unchanged tasks — leave them out entirely; they are kept automatically. (Building a brand-new plan? Then every task is new, so upsert them all.)
 - NEVER output completed tasks in either array — they are locked.
-- When modifying an existing task, reuse its exact id and include the complete updated object (all fields), not just the changed field.
-- No placeholders, no truncation (no \`//...\`), no comments.
+- When modifying an existing task, reuse its exact id and include the complete updated object (all fields), not just the changed field. Use a short random id for a brand-new task.
 - steps: 3–7 specific steps per task; preserve existing step IDs and completed state.
-- notes: always rich; never a single sentence or empty string.
-- location: plain text only, never coordinates. Propose one for tasks tied to a real physical place; infer from context but never invent a specific venue the user hasn't hinted at. Keep existing locations unless the user asked to change them; empty string when there is no physical place.
+- notes: always rich (purpose · steps · acceptance criteria · resources · blockers · estimated duration); never a single sentence or empty string.
+- dueDate: YYYY-MM-DD or empty string. dueTime: HH:MM 24-hour or empty string — assign a realistic time of day.
+- location: MUST be a place that Google Maps can find — a specific venue/business name (e.g. "PureGym Birmingham City Centre", "Trader Joe's Union Square") or a full street address. Plain text only, never coordinates.
+  - NEVER use vague or relative terms that cannot be geocoded: do NOT write "家中", "家", "公司", "办公室", "home", "my house", "the office", "online", "anywhere", "TBD", or similar. These produce a wrong map pin.
+  - For a task done at home or at work: if the personal context above gives the user's real home/work address or city, use that actual address; if it does not, leave location as an EMPTY string rather than writing "home"/"家中".
+  - Only set a location for tasks tied to a real physical place. Infer a plausible nearby place from the user's city/context, but never invent a specific venue the user hasn't hinted at — when unsure, prefer a full address or leave it empty.
+  - Keep existing locations unless the user asked to change them; use an empty string when there is no physical place (e.g. phone calls, online, reading, thinking).
 `.trim();
 }
 
 // ---------------------------------------------------------------------------
-// Response parsing helpers
+// Conversation reply helpers (Call 1 cleanup). The plan delta (Call 2) and My
+// Day suggestions are now returned as validated JSON by the AI SDK's
+// generateObject, so the old JSON extraction / salvage / parse helpers are gone.
 // ---------------------------------------------------------------------------
-interface PlanUpdate {
-  text: string;
-  // Incomplete tasks to add or modify. null ONLY when nothing parseable was
-  // recovered (treated as a generation failure by the caller).
-  upsert: Todo[] | null;
-  // Ids of incomplete tasks to delete.
-  remove: string[];
-  planTitle: string | null;
-}
-
 type ControlToken = 'asking' | 'proposed' | 'confirmed' | null;
 
 function stripControlToken(text: string): { text: string; token: ControlToken } {
@@ -167,35 +152,6 @@ function stripControlToken(text: string): { text: string; token: ControlToken } 
   else if (/<<<\s*ASKING\s*>>>/i.test(text)) token = 'asking';
   const cleaned = text.replace(/<<<\s*(CONFIRMED|PROPOSED|ASKING|READY|TRUNCATED)\s*>>>/gi, '').trim();
   return { text: cleaned, token };
-}
-
-// Pull a JSON payload out of a model reply. Prefer a fenced ```json block, but
-// fall back to the outermost { } / [ ] span so a reply that emits raw, unfenced
-// JSON still parses. (A truncated reply with no closing fence/brace yields no
-// parseable block — that's handled as a failure by the caller.)
-function extractJsonBlock(responseText: string): { jsonText: string; textWithout: string } | null {
-  const fenced = responseText.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) {
-    return { jsonText: fenced[1], textWithout: responseText.replace(fenced[0], '').trim() };
-  }
-  const objStart = responseText.indexOf('{');
-  const arrStart = responseText.indexOf('[');
-  let start = -1;
-  let endChar = '';
-  if (objStart !== -1 && (arrStart === -1 || objStart < arrStart)) {
-    start = objStart;
-    endChar = '}';
-  } else if (arrStart !== -1) {
-    start = arrStart;
-    endChar = ']';
-  }
-  if (start === -1) return null;
-  const end = responseText.lastIndexOf(endChar);
-  if (end <= start) return null;
-  return {
-    jsonText: responseText.slice(start, end + 1),
-    textWithout: (responseText.slice(0, start) + responseText.slice(end + 1)).trim(),
-  };
 }
 
 // When a reply ends with a colon lead-in to the JSON we strip out (e.g.
@@ -208,114 +164,60 @@ function trimTrailingLeadIn(text: string): string {
   return trimmed.replace(/[^\n。．.!?！？]*[:：]\s*$/u, '').trim();
 }
 
-// Best-effort recovery when the model's JSON is truncated mid-array (the
-// `finish_reason === 'length'` case that produced the "Expected ',' or ']'"
-// SyntaxError). Pulls every COMPLETE `{...}` object out of the named array,
-// ignoring a dangling partial final element, so a cut-off response still applies
-// the tasks that did come through instead of failing wholesale.
-function salvageObjectArray(text: string, key: string): Record<string, unknown>[] {
-  const keyMatch = text.search(new RegExp('"' + key + '"\\s*:\\s*\\['));
-  if (keyMatch === -1) return [];
-  let i = text.indexOf('[', keyMatch) + 1;
-  const objects: Record<string, unknown>[] = [];
-  while (i < text.length) {
-    while (i < text.length && /[\s,]/.test(text[i])) i++; // skip whitespace / commas
-    if (i >= text.length || text[i] === ']') break;
-    if (text[i] !== '{') break;
-    let depth = 0;
-    let inStr = false;
-    let esc = false;
-    const start = i;
-    for (; i < text.length; i++) {
-      const c = text[i];
-      if (esc) { esc = false; continue; }
-      if (c === '\\') { esc = true; continue; }
-      if (c === '"') { inStr = !inStr; continue; }
-      if (inStr) continue;
-      if (c === '{') depth++;
-      else if (c === '}' && --depth === 0) { i++; break; }
-    }
-    if (depth !== 0) break; // final object was truncated — stop here
-    try {
-      objects.push(JSON.parse(text.slice(start, i)));
-    } catch {
-      break;
-    }
-  }
-  return objects;
-}
-
-// Extract the delta (upsert / remove / planTitle) from a model reply. No
-// reconciliation happens here — that is deliberately deferred to applyTodoDelta
-// at commit time so it can run against the LATEST plan state, not a stale
-// send-time snapshot.
-function parsePlanUpdate(responseText: string): PlanUpdate {
-  const block = extractJsonBlock(responseText);
-  if (!block) return { text: responseText, upsert: null, remove: [], planTitle: null };
-
-  const sanitized = block.jsonText
-    .split('\n')
-    .filter((line) => !line.trim().startsWith('//'))
-    .join('\n');
-
-  let upsert: Todo[] | null = null;
-  let remove: string[] = [];
-  let planTitle: string | null = null;
-
-  try {
-    const parsed = JSON.parse(sanitized);
-    if (Array.isArray(parsed)) {
-      upsert = parsed as Todo[];
-    } else if (parsed && typeof parsed === 'object') {
-      if (Array.isArray(parsed.upsert)) upsert = parsed.upsert as Todo[];
-      else if (Array.isArray(parsed.todos)) upsert = parsed.todos as Todo[]; // tolerate legacy full-array replies
-      if (Array.isArray(parsed.remove)) remove = parsed.remove.map(String);
-      if (typeof parsed.planTitle === 'string' && parsed.planTitle.trim()) {
-        planTitle = parsed.planTitle.trim();
-      }
-    }
-  } catch {
-    // Truncated / malformed JSON — salvage every complete task that arrived
-    // before the cut-off rather than discarding the whole update.
-    const salvaged = salvageObjectArray(sanitized, 'upsert');
-    if (salvaged.length) upsert = salvaged as unknown as Todo[];
-    const titleMatch = sanitized.match(/"planTitle"\s*:\s*"([^"]+)"/);
-    if (titleMatch) planTitle = titleMatch[1].trim();
-    if (upsert) {
-      console.warn(`[usePlans] Recovered ${upsert.length} task(s) from truncated JSON.`);
-    } else {
-      console.error('[usePlans] Failed to parse AI JSON block:\nRaw block:', block.jsonText);
-    }
-  }
-
-  // A JSON block was present — clean any dangling "here is the plan:" lead-in.
-  const hasJson = upsert !== null || planTitle !== null;
-  return {
-    text: hasJson ? trimTrailingLeadIn(block.textWithout) : block.textWithout,
-    upsert,
-    remove,
-    planTitle,
-  };
-}
-
 // Normalise one upserted task, restoring the client/server-owned fields the AI
+// Vague / relative "locations" the AI sometimes emits that Google Maps cannot
+// geocode into a meaningful pin (it would drop a pin on a random literal match).
+// Matched as a whole string (case-insensitive, punctuation-trimmed) so real place
+// names that merely contain these words — "Homebase Birmingham", "宜家家居" — are
+// kept. The user's real home/work address (when known) is a proper address and is
+// not in this set, so it passes through.
+const NON_GEOCODABLE_LOCATIONS = new Set([
+  'home', 'at home', 'my home', 'my house', 'house', 'house/home',
+  'work', 'at work', 'the office', 'office', 'workplace', 'my office',
+  'online', 'remote', 'anywhere', 'various', 'tbd', 'tba', 'n/a', 'na', 'none',
+  '家', '家中', '在家', '家里', '公司', '在公司', '办公室', '线上', '网上', '在线', '远程', '任意地点', '无',
+]);
+
+// Drop locations that are not real, geocodable places so the map never shows a
+// misplaced pin. Returns '' for a vague term, the trimmed value otherwise.
+function sanitizeLocation(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const normalized = trimmed.toLowerCase().replace(/[.。!！?？,，;；:：]+$/u, '').trim();
+  return NON_GEOCODABLE_LOCATIONS.has(normalized) ? '' : trimmed;
+}
+
 // never sees (coordinates, My Day, createdAt) from the existing copy when there
 // is one. New tasks get fresh defaults.
-function mergeUpsertTodo(up: Todo, existing: Todo | undefined): Todo {
-  const location = typeof up.location === 'string' ? up.location : existing?.location ?? '';
+function mergeUpsertTodo(up: UpsertTodo, existing: Todo | undefined): Todo {
+  const rawLocation = typeof up.location === 'string' ? up.location : existing?.location ?? '';
+  const location = sanitizeLocation(rawLocation);
   // Never trust AI-emitted coordinates: keep the stored ones while the location
   // text is unchanged, otherwise reset so the map re-geocodes.
   const keepCoords = !!existing && (existing.location ?? '') === location;
+  // Todo/step ids are GLOBAL primary keys, but the AI emits terse ids ("t10"/"s1")
+  // that repeat across plans and collide in the DB. So never persist an AI id:
+  // keep an existing todo's real id (an in-place update), but mint a fresh UUID
+  // for a brand-new todo and for every step of an upserted task (the AI re-sends a
+  // task's full step list on each change, carrying the completed flag by value).
+  const id = existing?.id ?? generateId();
+  const steps = (up.steps ?? []).map((s) => ({
+    id: generateId(),
+    text: s.text,
+    completed: s.completed ?? false,
+  }));
   return {
     ...up,
+    id,
     completed: false, // upserts only ever touch incomplete tasks
-    steps: up.steps ?? [],
+    steps,
     dueTime: up.dueTime ?? '',
     location,
     locationLat: keepCoords ? existing!.locationLat ?? null : null,
     locationLng: keepCoords ? existing!.locationLng ?? null : null,
     myDay: existing?.myDay ?? false,
-    createdAt: existing?.createdAt ?? up.createdAt ?? new Date().toISOString(),
+    myDayOrder: existing?.myDayOrder ?? 0,
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
   };
 }
 
@@ -329,7 +231,7 @@ function mergeUpsertTodo(up: Todo, existing: Todo | undefined): Todo {
 //   knownIds = ids the AI saw at send time (so a task the user deleted
 //              mid-request is not resurrected as a "new" upsert)
 function applyTodoDelta(
-  upsert: Todo[],
+  upsert: UpsertTodo[],
   remove: string[],
   base: Todo[],
   knownIds: Set<string>
@@ -362,47 +264,54 @@ function applyTodoDelta(
     if (knownIds.has(id)) continue;
     result.push(mergeUpsertTodo(up, undefined));
   }
-  return result;
+
+  // Both todo ids AND step ids are GLOBAL primary keys in the DB, but the AI
+  // routinely emits terse ids like "t10"/"s1" that collide — with each other
+  // across tasks, or with ids already in the plan (e.g. "add more tasks" makes it
+  // re-number from "t10" onto an existing "t10"). A single such clash made the
+  // bulk save throw a duplicate-key error and roll back the WHOLE write, so the
+  // plan vanished on refresh. Give every todo and every step a globally-unique id
+  // before persist: keep the first occurrence and regenerate any later duplicate
+  // (or blank id). Only the colliding objects are cloned, preserving referential
+  // stability for untouched tasks.
+  const seenTodoIds = new Set<string>();
+  const seenStepIds = new Set<string>();
+  return result.map((todo) => {
+    let id = todo.id;
+    if (!id || seenTodoIds.has(id)) id = generateId();
+    seenTodoIds.add(id);
+
+    let stepsChanged = false;
+    const steps = (todo.steps ?? []).map((s) => {
+      let sid = s.id;
+      if (!sid || seenStepIds.has(sid)) sid = generateId();
+      seenStepIds.add(sid);
+      if (sid === s.id) return s;
+      stepsChanged = true;
+      return { ...s, id: sid };
+    });
+
+    if (id === todo.id && !stepsChanged) return todo;
+    return { ...todo, id, steps };
+  });
 }
 
-// ---------------------------------------------------------------------------
-// My Day suggestion parsing
-// ---------------------------------------------------------------------------
-interface RawSuggestion {
-  id: string;
-  reason: string;
-}
-
-// The model is asked for a bare JSON array, but tolerate code fences / surrounding prose.
-function parseSuggestions(responseText: string, validIds: Set<string>): RawSuggestion[] {
-  let jsonText = responseText.trim();
-  const block = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (block) {
-    jsonText = block[1].trim();
-  } else {
-    const start = jsonText.indexOf('[');
-    const end = jsonText.lastIndexOf(']');
-    if (start !== -1 && end > start) jsonText = jsonText.slice(start, end + 1);
+// Filter raw suggestions down to valid, unique task ids (the AI may name a task
+// that was completed/deleted between the request and the reply). Returns the
+// `{ id, reason }` shape stored in `suggestionRaw`.
+function filterSuggestions(
+  raw: { id: string; reason: string }[],
+  validIds: Set<string>
+): { id: string; reason: string }[] {
+  const seen = new Set<string>();
+  const out: { id: string; reason: string }[] = [];
+  for (const item of raw) {
+    const id = String(item?.id ?? '');
+    if (!id || !validIds.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, reason: typeof item.reason === 'string' ? item.reason.trim() : '' });
   }
-
-  try {
-    const parsed = JSON.parse(jsonText);
-    if (!Array.isArray(parsed)) return [];
-    const seen = new Set<string>();
-    const out: RawSuggestion[] = [];
-    for (const item of parsed) {
-      if (!item || typeof item !== 'object') continue;
-      const id = String((item as { id?: unknown }).id ?? '');
-      if (!id || !validIds.has(id) || seen.has(id)) continue;
-      seen.add(id);
-      const reason = (item as { reason?: unknown }).reason;
-      out.push({ id, reason: typeof reason === 'string' ? reason.trim() : '' });
-    }
-    return out;
-  } catch (e) {
-    console.error('[usePlans] Failed to parse suggestions JSON:', e, '\nRaw:', responseText);
-    return [];
-  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -515,8 +424,12 @@ export function usePlans() {
     p.todos.map((t) => ({ ...t, planId: p.id, planTitle: p.title }))
   );
 
-  // "My Day" — every todo (across all plans) the user has flagged for today.
-  const myDayTodos: TodoWithPlan[] = allTodos.filter((t) => t.myDay);
+  // "My Day" — every todo (across all plans) the user has flagged for today,
+  // ordered by the user's manual My Day ordering (stable sort keeps the original
+  // order among items that share a value, e.g. all-zero before any reorder).
+  const myDayTodos: TodoWithPlan[] = allTodos
+    .filter((t) => t.myDay)
+    .sort((a, b) => (a.myDayOrder ?? 0) - (b.myDayOrder ?? 0));
 
   // Suggested tasks, resolved against current todos: a suggestion disappears once
   // the underlying task is completed, deleted, or already added to My Day.
@@ -660,6 +573,44 @@ export function usePlans() {
     persistTodos(activePlan.id, newTodos);
   };
 
+  // Reorder the active (incomplete) tasks of a plan via drag-and-drop. The new
+  // order is the array order, which the PUT route persists as sort_order (and GET
+  // reads back ordered by it). Completed tasks keep their place at the end.
+  const reorderTodos = (planId: string, orderedActiveIds: string[]) => {
+    const plan = plans.find((p) => p.id === planId);
+    if (!plan) return;
+    const byId = new Map(plan.todos.map((t) => [t.id, t]));
+    const ordered = orderedActiveIds
+      .map((id) => byId.get(id))
+      .filter((t): t is Todo => !!t && !t.completed);
+    const orderedSet = new Set(ordered.map((t) => t.id));
+    // Keep anything the drag list didn't cover (completed tasks, plus any active
+    // task missing from the payload) in its existing relative order.
+    const rest = plan.todos.filter((t) => !orderedSet.has(t.id));
+    const newTodos = [...ordered, ...rest];
+    updateTodos(planId, newTodos);
+    persistTodos(planId, newTodos);
+  };
+
+  // Reorder the My Day view (spans plans). Stamp each id with its new index as
+  // myDayOrder in state, then persist the full order to the dedicated endpoint.
+  const reorderMyDay = (orderedIds: string[]) => {
+    const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
+    setPlans((prev) =>
+      prev.map((p) => ({
+        ...p,
+        todos: p.todos.map((t) =>
+          orderMap.has(t.id) ? { ...t, myDayOrder: orderMap.get(t.id)! } : t
+        ),
+      }))
+    );
+    fetch('/api/todos/myday-order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderedIds }),
+    }).catch(console.error);
+  };
+
   const updateSelectedTodo = (updates: Partial<Todo>) => {
     if (!selectedTodoId) return;
     const plan = findPlanByTodoId(selectedTodoId);
@@ -732,13 +683,11 @@ B) "Do it now" tasks — tasks with NO dueDate, NO dueTime, and NO location. The
 
 Pick at most 6 tasks. Lead with the most time-sensitive ones, then add "do it now" tasks. Only skip a task when it is clearly scheduled for a later date AND not high priority.
 
-Respond with ONLY a JSON array, no prose and no code fences:
-[{ "id": "<task id>", "reason": "<max 10 words on why it belongs today>" }]
-If nothing is worth suggesting, respond with exactly: []`;
+Return the chosen tasks as { id, reason } entries, where "reason" is max 10 words on why it belongs today. If nothing is worth suggesting, return an empty list.`;
 
-      const raw = await callChat([{ role: 'user', content: JSON.stringify(compact) }], system);
+      const raw = await generateSuggestions([{ role: 'user', content: JSON.stringify(compact) }], system);
       const validIds = new Set(candidates.map((c) => c.id));
-      setSuggestionRaw(parseSuggestions(raw, validIds));
+      setSuggestionRaw(filterSuggestions(raw, validIds));
       setSuggestionsLoaded(true);
     } catch (e) {
       console.error('[usePlans] loadSuggestions failed:', e);
@@ -838,25 +787,26 @@ If nothing is worth suggesting, respond with exactly: []`;
       const planHistory: ApiMessage[] = [
         ...history,
         { role: 'assistant', content: chatText },
-        { role: 'user', content: 'Now output ONLY the delta (upsert + remove) as JSON, following the schema and rules exactly. Only the incomplete tasks that are new or changed. No prose, no code fences.' },
+        { role: 'user', content: 'Now produce the plan delta (upsert + remove) following the rules exactly — only the incomplete tasks that are new or changed.' },
       ];
 
-      let parsed: PlanUpdate = { text: '', upsert: null, remove: [], planTitle: null };
-      let wasTruncated = false;
+      // The server runs generateObject against planDeltaSchema, so the reply is
+      // already validated, typed JSON — no extraction, salvage, or retry loop
+      // needed (the AI SDK retries transient failures itself). A thrown/422
+      // response means generation genuinely failed.
+      let delta: PlanDelta | null = null;
       try {
-        for (let attempt = 0; attempt < 3 && !parsed.upsert; attempt++) {
-          const rawJson = await callChat(planHistory, planInstruction);
-          if (/<<<\s*TRUNCATED\s*>>>/i.test(rawJson)) wasTruncated = true;
-          parsed = parsePlanUpdate(stripControlToken(rawJson).text);
-        }
+        delta = await generatePlanDelta(planHistory, planInstruction);
+      } catch (e) {
+        console.error('[usePlans] plan delta generation failed:', e);
       } finally {
         setUpdatingPlanIds((prev) => ({ ...prev, [planId]: false }));
       }
 
-      if (parsed.upsert) {
-        const aiUpsert = parsed.upsert;
-        const aiRemove = parsed.remove;
-        const planTitle = parsed.planTitle;
+      if (delta) {
+        const aiUpsert = delta.upsert ?? [];
+        const aiRemove = delta.remove ?? [];
+        const planTitle = delta.planTitle?.trim() || null;
         const knownIds = new Set(currentTodos.map((t) => t.id));
 
         // flushSync forces the functional updater to run synchronously so
@@ -865,19 +815,22 @@ If nothing is worth suggesting, respond with exactly: []`;
         // when persistTodos is reached — the AI update shows in the UI but never
         // reaches the DB, so it vanishes on refresh.
         let committedTodos: Todo[] | null = null;
+        // Newly-added tasks, captured inside the updater for the entry animation:
+        // applyTodoDelta mints fresh ids for new tasks, so the AI's terse ids
+        // wouldn't match the rendered ones — derive from the committed todos.
+        let addedIds: string[] = [];
         flushSync(() =>
           setPlans((prev) =>
             prev.map((p) => {
               if (p.id !== planId) return p;
               const todos = applyTodoDelta(aiUpsert, aiRemove, p.todos, knownIds);
               committedTodos = todos;
+              addedIds = todos.filter((t) => !knownIds.has(t.id)).map((t) => t.id);
               return { ...p, ...(planTitle ? { title: planTitle } : {}), todos };
             })
           )
         );
 
-        // Highlight newly-added tasks for the entry animation.
-        const addedIds = aiUpsert.filter((t) => !knownIds.has(t.id)).map((t) => t.id);
         if (addedIds.length) setAiAddedTodoIds(addedIds);
 
         if (committedTodos) persistTodos(planId, committedTodos);
@@ -892,9 +845,7 @@ If nothing is worth suggesting, respond with exactly: []`;
         // Generation failed — tell the user honestly instead of silently no-op'ing.
         appendAiMessage(
           planId,
-          wasTruncated
-            ? "I couldn't generate the updated plan — it was too long to fit in one response. Try splitting it into smaller plans or trimming the number of tasks."
-            : "I couldn't generate the updated plan just now. Please ask me again, or rephrase the change."
+          "I couldn't generate the updated plan just now. Please ask me again, or rephrase the change."
         );
       }
     }
@@ -943,6 +894,8 @@ If nothing is worth suggesting, respond with exactly: []`;
     toggleTodo,
     deleteTodo,
     addTodoManual,
+    reorderTodos,
+    reorderMyDay,
     updateSelectedTodo,
     handleSendMessage,
     aiAddedTodoIds,

@@ -89,7 +89,7 @@ Open [http://localhost:3000](http://localhost:3000). The database tables are cre
 - **NextAuth v5** (Auth.js) for authentication with JWT sessions — Credentials + Google providers
 - **PostgreSQL** via the `pg` driver for persistent storage
 - **bcryptjs** for password hashing
-- **DeepSeek API** (via the `openai` npm package with a custom `baseURL`)
+- **Vercel AI SDK** (`ai` + `@ai-sdk/deepseek`) — `streamText` for chat, `streamObject`/`generateObject` + Zod for structured plan + suggestion output, against the DeepSeek API
 - **@vis.gl/react-google-maps** for the location picker and task map
 - **vaul** for the task details drawer (bottom sheet on mobile)
 - **GSAP** for task entry animations
@@ -110,7 +110,9 @@ app/
     auth/
       [...nextauth]/route.ts      # NextAuth route handler
       register/route.ts           # user registration endpoint
-    chat/route.ts                 # calls DeepSeek
+    chat/route.ts                 # Call 1 — stream conversation (AI SDK streamText)
+    plan/route.ts                 # Call 2 — plan delta (streamObject + Zod)
+    suggestions/route.ts          # My Day suggestions (generateObject + Zod)
     profile/
       route.ts                    # GET account details + stats, PATCH name
       password/route.ts           # PUT change password
@@ -138,7 +140,9 @@ hooks/
   usePlans.ts                     # all state, AI agent logic, and DB persistence
 lib/
   db.ts                           # pg connection pool + schema auto-init
-  api.ts                          # fetch wrapper for /api/chat
+  ai.ts                           # DeepSeek provider factory (@ai-sdk/deepseek)
+  schemas.ts                      # Zod schemas for structured AI output
+  api.ts                          # client helpers for the AI routes
   utils.ts                        # shared helpers
 types/
   index.ts                        # Todo, Plan, Step, Priority types

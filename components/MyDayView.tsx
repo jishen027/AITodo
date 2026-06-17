@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Plus, Circle, CheckCircle2, Flag, Calendar, AlignLeft, ListChecks, Sun, X, Sparkles, RefreshCw, Loader2, Clock, Lightbulb, ChevronLeft } from 'lucide-react';
+import { useState, useEffect, useRef, Fragment } from 'react';
+import { Plus, Circle, CheckCircle2, Flag, Calendar, AlignLeft, ListChecks, Sun, X, Sparkles, RefreshCw, Loader2, Clock, Lightbulb, ChevronLeft, GripVertical } from 'lucide-react';
 import { TodoWithPlan, MyDaySuggestion } from '@/types';
 import { getPriorityColor } from '@/lib/utils';
 import { useSwipe } from '@/hooks/useSwipe';
+import { useDragReorder } from '@/hooks/useDragReorder';
 import PullToRefresh from '@/components/PullToRefresh';
 
 interface MyDayViewProps {
@@ -14,6 +15,7 @@ interface MyDayViewProps {
   onSelectTodo: (id: string) => void;
   onToggleTodo: (id: string, e?: React.MouseEvent) => void;
   onRemoveFromMyDay: (id: string, e?: React.MouseEvent) => void;
+  onReorderMyDay: (orderedIds: string[]) => void;
   suggestions: MyDaySuggestion[];
   dueSoonTodos: TodoWithPlan[];
   recentlyAddedTodos: TodoWithPlan[];
@@ -102,6 +104,7 @@ export default function MyDayView({
   onSelectTodo,
   onToggleTodo,
   onRemoveFromMyDay,
+  onReorderMyDay,
   suggestions,
   dueSoonTodos,
   recentlyAddedTodos,
@@ -118,6 +121,17 @@ export default function MyDayView({
   const panelSwipe = useSwipe({ onSwipeLeft: () => setShowPanel(false) });
 
   const activeTodos = myDayTodos.filter((t) => !t.completed);
+
+  // Drag-to-reorder the active My Day tasks (the order spans plans and persists
+  // via onReorderMyDay). The dragged row lifts onto the cursor and a slot marks
+  // the drop target; `order` re-syncs whenever activeTodos changes.
+  const { order, draggingId, dragSize, setItemRef, placeholderRef, dragHandleProps, floatStyle, shouldIgnoreClick } =
+    useDragReorder(activeTodos.map((t) => t.id), onReorderMyDay);
+  const activeById = new Map(activeTodos.map((t) => [t.id, t]));
+  const orderedActiveTodos = [
+    ...order.map((id) => activeById.get(id)).filter((t): t is TodoWithPlan => !!t),
+    ...activeTodos.filter((t) => !order.includes(t.id)),
+  ];
   // Only surface tasks completed *today* (local time). Tasks completed on an
   // earlier day — or before completion timestamps were tracked — drop off so the
   // list stays focused on today's progress.
@@ -175,16 +189,36 @@ export default function MyDayView({
 
           {/* Active Todos */}
           <div className="space-y-2 mb-8">
-            {activeTodos.map((todo) => (
+            {orderedActiveTodos.map((todo) => {
+              const isDragging = draggingId === todo.id;
+              return (
+              <Fragment key={todo.id}>
+              {/* Slot left behind by the lifted task — the drop target */}
+              {isDragging && (
+                <div
+                  ref={placeholderRef}
+                  style={{ height: dragSize?.h }}
+                  className="rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50/50"
+                />
+              )}
               <div
-                key={todo.id}
+                ref={setItemRef(todo.id)}
                 data-todo-id={todo.id}
-                onClick={() => onSelectTodo(todo.id)}
+                onClick={() => { if (shouldIgnoreClick()) return; onSelectTodo(todo.id); }}
+                style={floatStyle(todo.id)}
                 className={`
-                  group flex items-center gap-3 p-3.5 rounded-xl shadow-sm border transition-all cursor-pointer
-                  ${selectedTodoId === todo.id ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-transparent hover:border-gray-200'}
+                  group flex items-center gap-2 p-3.5 rounded-xl shadow-sm border transition-shadow cursor-pointer
+                  ${isDragging ? 'border-indigo-300 shadow-2xl ring-2 ring-indigo-300 bg-white' : selectedTodoId === todo.id ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-transparent hover:border-gray-200'}
                 `}
               >
+                <button
+                  {...dragHandleProps(todo.id)}
+                  title="Drag to reorder"
+                  aria-label="Drag to reorder"
+                  className="flex-shrink-0 -ml-1.5 p-0.5 text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing touch-none md:opacity-0 md:group-hover:opacity-100 transition"
+                >
+                  <GripVertical className="w-4 h-4" />
+                </button>
                 <button
                   onClick={(e) => onToggleTodo(todo.id, e)}
                   className="text-gray-300 hover:text-indigo-500 flex-shrink-0 transition-colors"
@@ -223,7 +257,9 @@ export default function MyDayView({
                   <X className="w-4 h-4" />
                 </button>
               </div>
-            ))}
+              </Fragment>
+              );
+            })}
             {activeTodos.length === 0 && completedTodos.length === 0 && (
               <div className="text-center py-16 text-gray-400">
                 <Sun className="w-12 h-12 mx-auto mb-3 text-amber-200" />

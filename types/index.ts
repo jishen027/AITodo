@@ -19,6 +19,7 @@ export interface Todo {
   locationLat?: number | null;
   locationLng?: number | null;
   myDay?: boolean;
+  myDayOrder?: number;
   createdAt?: string;
   completedAt?: string | null;
 }

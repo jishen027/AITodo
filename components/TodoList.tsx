@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, Fragment } from 'react';
 import { gsap } from 'gsap';
-import { Plus, Circle, CheckCircle2, Trash2, Flag, Calendar, AlignLeft, Edit2, ListChecks, Bot, Sparkles, Sun } from 'lucide-react';
+import { Plus, Circle, CheckCircle2, Trash2, Flag, Calendar, AlignLeft, Edit2, ListChecks, Bot, Sparkles, Sun, GripVertical } from 'lucide-react';
 import { Plan, Todo } from '@/types';
 import { getPriorityColor } from '@/lib/utils';
+import { useDragReorder } from '@/hooks/useDragReorder';
 import ConfirmModal from '@/components/ConfirmModal';
 import PullToRefresh from '@/components/PullToRefresh';
 
@@ -24,6 +25,7 @@ interface TodoListProps {
   onToggleTodo: (id: string, e?: React.MouseEvent) => void;
   onToggleMyDay: (id: string, e?: React.MouseEvent) => void;
   onDeleteTodo: (id: string, e?: React.MouseEvent) => void;
+  onReorderTodos: (orderedIds: string[]) => void;
   onAddTodo: (e: React.KeyboardEvent) => void;
   onNewTaskTextChange: (text: string) => void;
   onStartEditTitle: () => void;
@@ -47,6 +49,7 @@ export default function TodoList({
   onToggleTodo,
   onToggleMyDay,
   onDeleteTodo,
+  onReorderTodos,
   onAddTodo,
   onNewTaskTextChange,
   onStartEditTitle,
@@ -61,6 +64,20 @@ export default function TodoList({
   const [justMovedIds, setJustMovedIds] = useState<string[]>([]);
   // ID of the todo awaiting delete confirmation
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  // Drag-to-reorder the active tasks. The hook lifts the dragged row onto the
+  // cursor, marks the drop slot, and commits once on drop; `order` re-syncs
+  // whenever activeTodos changes.
+  const { order, draggingId, dragSize, setItemRef, placeholderRef, dragHandleProps, floatStyle, shouldIgnoreClick } =
+    useDragReorder(activeTodos.map((t) => t.id), onReorderTodos);
+  // Render activeTodos in the drag order, tolerating a brief mismatch before the
+  // hook re-syncs (e.g. a task just added/removed): show known ids first, then any
+  // not yet in `order`.
+  const activeById = new Map(activeTodos.map((t) => [t.id, t]));
+  const orderedActiveTodos = [
+    ...order.map((id) => activeById.get(id)).filter((t): t is Todo => !!t),
+    ...activeTodos.filter((t) => !order.includes(t.id)),
+  ];
 
   // Animate in todos added by the AI
   useEffect(() => {
@@ -219,16 +236,36 @@ export default function TodoList({
 
         {/* Active Todos */}
         <div ref={listRef} className="space-y-2 mb-8">
-          {activeTodos.map((todo) => (
+          {orderedActiveTodos.map((todo) => {
+            const isDragging = draggingId === todo.id;
+            return (
+            <Fragment key={todo.id}>
+            {/* Slot left behind by the lifted task — the drop target */}
+            {isDragging && (
+              <div
+                ref={placeholderRef}
+                style={{ height: dragSize?.h }}
+                className="rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50/50"
+              />
+            )}
             <div
-              key={todo.id}
+              ref={setItemRef(todo.id)}
               data-todo-id={todo.id}
-              onClick={() => onSelectTodo(todo.id)}
+              onClick={() => { if (shouldIgnoreClick()) return; onSelectTodo(todo.id); }}
+              style={floatStyle(todo.id)}
               className={`
-                group flex items-center gap-3 p-3.5 rounded-xl shadow-sm border transition-all cursor-pointer
-                ${selectedTodoId === todo.id ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-transparent hover:border-gray-200'}
+                group flex items-center gap-2 p-3.5 rounded-xl shadow-sm border transition-shadow cursor-pointer
+                ${isDragging ? 'border-indigo-300 shadow-2xl ring-2 ring-indigo-300 bg-white' : selectedTodoId === todo.id ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-transparent hover:border-gray-200'}
               `}
             >
+              <button
+                {...dragHandleProps(todo.id)}
+                title="Drag to reorder"
+                aria-label="Drag to reorder"
+                className="flex-shrink-0 -ml-1.5 p-0.5 text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing touch-none md:opacity-0 md:group-hover:opacity-100 transition"
+              >
+                <GripVertical className="w-4 h-4" />
+              </button>
               <button
                 onClick={(e) => handleToggle(todo.id, e)}
                 className="text-gray-300 hover:text-indigo-500 flex-shrink-0 transition-colors"
@@ -284,7 +321,9 @@ export default function TodoList({
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
-          ))}
+            </Fragment>
+            );
+          })}
           {activeTodos.length === 0 && completedTodos.length === 0 && (
             <div className="text-center py-10 text-gray-400 text-sm">
               No tasks yet — ask AI to help you get started.

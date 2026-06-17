@@ -92,6 +92,11 @@ async function createSchema() {
   await pool.query(`
     ALTER TABLE todos ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
   `);
+  // User-defined ordering of tasks within the My Day view (which spans plans, so
+  // the per-plan sort_order can't express it). Reordering My Day writes this.
+  await pool.query(`
+    ALTER TABLE todos ADD COLUMN IF NOT EXISTS my_day_order INTEGER NOT NULL DEFAULT 0;
+  `);
   // User-specific context (address, personal details, preferences) fed to the AI
   // assistant so it can tailor generated plans.
   await pool.query(`
