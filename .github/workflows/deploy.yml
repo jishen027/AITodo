@@ -74,6 +74,8 @@ jobs:
             --cache-from type=local,src=/tmp/.buildx-cache \
             --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
             --build-arg NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}" \
+            --build-arg NEXT_PUBLIC_SITE_URL="${{ secrets.NEXT_PUBLIC_SITE_URL }}" \
+            --build-arg NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION="${{ secrets.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION }}" \
             --load \
             --tag aitodo:latest \
             .

@@ -2,15 +2,16 @@ services:
   app:
     image: aitodo:latest
     # Build args bake the NEXT_PUBLIC_* values into the bundle at build time.
-    # Compose substitutes ${...} from the .env file in this directory, so keep
-    # NEXT_PUBLIC_SITE_URL (and the others) in .env. Rebuild after changing them:
-    #   docker compose build --no-cache && docker compose up -d
+    # CI builds the image with `docker buildx --build-arg ...` (see the GitHub
+    # Actions workflow), so this section only matters for a manual
+    # `docker compose build`. The `:-` defaults keep `docker compose up` quiet
+    # when these aren't exported (e.g. in CI, where the image is prebuilt).
     build:
       context: .
       args:
-        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
-        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
-        NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION: ${NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+        NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION: ${NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION:-}
     restart: unless-stopped
     ports:
       - "6001:3000"
