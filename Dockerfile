@@ -17,9 +17,15 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # NEXT_PUBLIC_* vars are inlined into the client bundle at build time, so they
-# must arrive here as build args — runtime env cannot change them.
+# must arrive here as build args — runtime env (docker-compose env_file) cannot
+# change them. This is why the SEO site URL must be a build arg: otherwise the
+# sitemap/canonical/OG tags fall back to http://localhost:3000.
 ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+ARG NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+ENV NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION=$NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
 
 # Placeholder values satisfy Next.js/NextAuth at build time; real values are
 # injected at runtime via the .env file loaded by docker-compose.
