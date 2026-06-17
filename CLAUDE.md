@@ -45,6 +45,7 @@ lib/ai.ts                    ← DeepSeek provider factory (@ai-sdk/deepseek)
 lib/schemas.ts               ← Zod schemas (planDeltaSchema, suggestionsSchema) + inferred types
 lib/api.ts                   ← client helpers: callChatStream (text), generatePlanDelta, generateSuggestions
 lib/utils.ts                 ← generateId, formatYMD, getPriorityColor
+lib/seo.ts                   ← SEO config: SITE_URL/NAME/DESCRIPTION/KEYWORDS, PUBLIC_ROUTES (shared by metadata, robots, sitemap, JSON-LD)
 lib/db.ts                    ← pg Pool singleton + lazy schema init (CREATE TABLE IF NOT EXISTS)
 auth.config.ts               ← Edge-compatible NextAuth config, used by middleware
 auth.ts                      ← full NextAuth config with Credentials provider (pg + bcryptjs)
@@ -132,6 +133,19 @@ Users can store a free-form **personal context** (location/address, schedule, pr
 | `/api/todos/myday-order` | PUT | Persist the user's manual My Day ordering (cross-plan) |
 
 All plan/todo/chat routes check `auth()` and return 401 if unauthenticated.
+
+### SEO
+
+All SEO config is centralised in `lib/seo.ts` and consumed by the Next.js Metadata API + file conventions:
+
+- **Root metadata** (`app/layout.tsx`) — `metadataBase`, title template (`%s · AI Todo`), description, keywords, Open Graph, Twitter card, `robots`, canonical, and an optional Google Search Console `verification` tag. `<html lang="en">` (the UI chrome is English).
+- **`app/robots.ts`** → `/robots.txt`: allows public routes, disallows `/dashboard`, `/profile`, `/login`, `/api/`, advertises the sitemap.
+- **`app/sitemap.ts`** → `/sitemap.xml`: lists `PUBLIC_ROUTES` (`/`, `/register`).
+- **`app/opengraph-image.tsx`** (+ `twitter-image.tsx` re-export) → a dynamically generated 1200×630 share card via `next/og` `ImageResponse`. Keep its text to default-font characters only (no `✓`/em-dash) — exotic glyphs trigger a dynamic-font fetch that fails offline.
+- **Structured data** — `components/StructuredData.tsx` emits Schema.org JSON-LD (`Organization` + `WebSite` + `WebApplication` `@graph`), rendered on the landing page.
+- **Per-page metadata** — client pages can't export `metadata`, so each has a thin server `layout.tsx`: `/dashboard` + `/profile` are `noindex`, `/login` is `noindex,follow`, `/register` is indexable with its own title/canonical.
+- **Middleware** — `middleware.ts`'s matcher **excludes** `robots.txt`, `sitemap.xml`, `manifest.webmanifest`, `opengraph-image`, `twitter-image`, and static images so crawlers aren't redirected to `/login`.
+- **Env** — `NEXT_PUBLIC_SITE_URL` (absolute production origin; **set at build time** since it's `NEXT_PUBLIC_*` and inlined) and optional `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION`.
 
 ### DeepSeek integration
 

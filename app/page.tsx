@@ -7,6 +7,7 @@ import { MessageSquare, CalendarDays, Layers, LayoutDashboard, LogOut } from 'lu
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useSession, signOut } from 'next-auth/react';
+import StructuredData from '@/components/StructuredData';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -128,6 +129,7 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
+      <StructuredData />
       {/* Nav */}
       <header ref={navRef} className="border-b border-gray-100">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
