@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import './globals.css';
 import { Providers } from './providers';
 
@@ -21,6 +22,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="zh">
       <body className="antialiased" suppressHydrationWarning>
         <Providers>{children}</Providers>
+        <Script
+          src="https://analytics.promptnotfound.com/script.js"
+          data-website-id="4117e5f5-c284-47c0-8644-62241a5371cf"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );
