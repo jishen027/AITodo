@@ -17,15 +17,24 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'orderedIds must be an array' }, { status: 400 });
   }
 
+  // Each id's position in the incoming array is its order value. Apply the
+  // updates sorted by id so every concurrent request locks the todo rows in the
+  // same deterministic order — otherwise two reorders racing over the same rows
+  // (e.g. rapid successive drops) deadlock: one holds row A waiting for row B
+  // while the other holds B waiting for A.
+  const updates = orderedIds
+    .map((id, ord) => ({ id, ord }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    for (let i = 0; i < orderedIds.length; i++) {
+    for (const { id, ord } of updates) {
       await client.query(
         `UPDATE todos t SET my_day_order = $1
          FROM plans p
          WHERE t.id = $2 AND t.plan_id = p.id AND p.user_id = $3`,
-        [i, orderedIds[i], userId]
+        [ord, id, userId]
       );
     }
     await client.query('COMMIT');

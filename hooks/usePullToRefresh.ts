@@ -54,6 +54,10 @@ export function usePullToRefresh<T extends HTMLElement = HTMLDivElement>({
     const onTouchStart = (e: TouchEvent) => {
       // Arm only at the very top, for single-finger drags, and not mid-refresh.
       if (refreshingRef.current || el.scrollTop > 0 || e.touches.length !== 1) return;
+      // Don't arm when the gesture began on a drag-to-reorder grip: pulling would
+      // translateY this container, making it the containing block for the dragged
+      // row's position:fixed float so it overshoots the finger on a downward drag.
+      if ((e.target as Element | null)?.closest?.('[data-drag-handle]')) return;
       startY = e.touches[0].clientY;
       pulling = true;
     };

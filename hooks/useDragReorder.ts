@@ -118,17 +118,35 @@ export function useDragReorder(ids: string[], onReorder: (orderedIds: string[]) 
       e.preventDefault();
       e.stopPropagation();
 
-      // Capture the pointer on the element so mobile browsers don't convert the
-      // touch into a scroll gesture (which would fire pointercancel and kill the
-      // drag). With capture active, subsequent pointer events are dispatched to
-      // `row` rather than window, so we listen there instead of window below.
-      try { row.setPointerCapture(e.pointerId); } catch (_) { /* unsupported */ }
+      // Capture the pointer so mobile browsers keep delivering pointermove for
+      // the whole drag instead of treating the touch as a scroll (which fires
+      // pointercancel and kills tracking). Capture on the HANDLE — not on `row`
+      // — because `row` lifts to `position: fixed` the moment the drag starts,
+      // and iOS Safari drops capture (firing pointercancel) when the *captured*
+      // element's layout changes. The handle itself never moves, so the capture
+      // holds; captured events still bubble to the window listeners below.
+      const handle = e.currentTarget as HTMLElement;
+      const pointerId = e.pointerId;
+      try { handle.setPointerCapture(pointerId); } catch (_) { /* unsupported */ }
 
       const rect = row.getBoundingClientRect();
       offsetRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
       pointerRef.current = { x: e.clientX, y: e.clientY };
       movedRef.current = false;
       draggingRef.current = id;
+      // Lift the row to `position: fixed` *now*, imperatively, instead of waiting
+      // for React to re-render it via `floatStyle`. On touch the first
+      // pointermove can fire before that re-render commits; positioning a row
+      // that's still in flow then makes it jump by its own offset — the "first
+      // drag moves too far, then corrects after wiggling" bug. Setting it here
+      // guarantees the float is already out of flow at 0,0 (and placed under the
+      // finger) before the first move arrives. React's `floatStyle` then applies
+      // the identical values on commit, so there's no conflict.
+      gsap.set(row, {
+        position: 'fixed', top: 0, left: 0, width: rect.width,
+        margin: 0, zIndex: 50, pointerEvents: 'none',
+      });
+      positionFloat(e.clientX, e.clientY);
       setDragSize({ w: rect.width, h: rect.height });
       setDraggingId(id);
       document.body.style.userSelect = 'none';
@@ -171,15 +189,18 @@ export function useDragReorder(ids: string[], onReorder: (orderedIds: string[]) 
       };
 
       const up = () => {
-        row.removeEventListener('pointermove', move);
-        row.removeEventListener('pointerup', up);
-        row.removeEventListener('pointercancel', up);
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        try { handle.releasePointerCapture(pointerId); } catch (_) { /* already released */ }
         finish();
       };
 
-      row.addEventListener('pointermove', move);
-      row.addEventListener('pointerup', up);
-      row.addEventListener('pointercancel', up);
+      // Listen on window: with capture active the events still bubble here, and
+      // if capture is unavailable this is the reliable fallback.
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
     },
     [computeOrder, positionFloat, onReorder]
   );
@@ -191,6 +212,10 @@ export function useDragReorder(ids: string[], onReorder: (orderedIds: string[]) 
       onPointerDown: (e: React.PointerEvent) => startDrag(id, e),
       onClick: (e: React.MouseEvent) => e.stopPropagation(),
       style: { touchAction: 'none' as const },
+      // Marks this as a reorder grip so a surrounding pull-to-refresh ignores
+      // the gesture (its translateY would otherwise become the containing block
+      // for the dragged row's position:fixed float and skew the tracking).
+      'data-drag-handle': '',
     }),
     [startDrag]
   );
