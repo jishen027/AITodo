@@ -45,3 +45,8 @@ export interface TodoWithPlan extends Todo {
 export interface MyDaySuggestion extends TodoWithPlan {
   reason: string;
 }
+
+export interface ChatOptions {
+  type: 'single' | 'multi';
+  options: string[];
+}

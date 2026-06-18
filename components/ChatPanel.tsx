@@ -1,10 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { MessageSquare, Bot, User, Send, PanelRightClose } from 'lucide-react';
+import { MessageSquare, Bot, User, Send, PanelRightClose, CheckCircle2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChatMessage } from '@/types';
+import { ChatMessage, ChatOptions, Todo } from '@/types';
+import { UpsertTodo } from '@/lib/schemas';
+import OptionButtons from './OptionButtons';
+import PlanDeltaPreview from './PlanDeltaPreview';
+
+interface PendingDelta {
+  upsert: UpsertTodo[];
+  remove: string[];
+}
 
 interface ChatPanelProps {
   chat: ChatMessage[];
@@ -13,12 +21,20 @@ interface ChatPanelProps {
   inputMessage: string;
   visible: boolean;
   planTitle: string;
+  chatOptions: ChatOptions | null;
+  isPlanProposed: boolean;
+  pendingDelta: PendingDelta | null;
+  currentTodos: Todo[];
   onInputChange: (v: string) => void;
-  onSend: () => void;
+  onSend: (text?: string) => void;
+  onApplyUpsert: (id: string) => void;
+  onApplyRemove: (id: string) => void;
+  onApplyAll: () => void;
+  onDismissDelta: () => void;
   onClose?: () => void;
 }
 
-export default function ChatPanel({ chat, isTyping, streamingText, inputMessage, visible, planTitle, onInputChange, onSend, onClose }: ChatPanelProps) {
+export default function ChatPanel({ chat, isTyping, streamingText, inputMessage, visible, planTitle, chatOptions, isPlanProposed, pendingDelta, currentTodos, onInputChange, onSend, onApplyUpsert, onApplyRemove, onApplyAll, onDismissDelta, onClose }: ChatPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // True while an IME composition is active (e.g. typing Chinese/Japanese) — we
@@ -160,6 +176,39 @@ export default function ChatPanel({ chat, isTyping, streamingText, inputMessage,
           </div>
         ))}
 
+        {isPlanProposed && !isTyping && !pendingDelta && (
+          <div className="flex gap-3 px-4">
+            <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+              <Bot className="w-5 h-5" />
+            </div>
+            <div className="flex flex-col gap-2.5 max-w-[80%]">
+              <p className="text-xs text-gray-400 pt-1.5">Ready to create this plan?</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => onSend("Looks good! Let's proceed.")}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Approve Plan
+                </button>
+                <span className="text-xs text-gray-400">or type changes below</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingDelta && !isTyping && (
+          <PlanDeltaPreview
+            upsert={pendingDelta.upsert}
+            remove={pendingDelta.remove}
+            currentTodos={currentTodos}
+            onApplyUpsert={onApplyUpsert}
+            onApplyRemove={onApplyRemove}
+            onApplyAll={onApplyAll}
+            onDismiss={onDismissDelta}
+          />
+        )}
+
         {isTyping && (
           <div className="flex gap-3">
             <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
@@ -221,7 +270,18 @@ export default function ChatPanel({ chat, isTyping, streamingText, inputMessage,
         <div ref={chatEndRef} />
       </div>
 
-      <div className="p-4 bg-white border-t border-gray-100 shrink-0">
+      {chatOptions && !isTyping && (
+        <div className="bg-white border-t border-gray-100 shrink-0 pt-3">
+          <p className="px-4 pb-2 text-xs text-gray-400 select-none">Choose an option or type your own:</p>
+          <OptionButtons
+            options={chatOptions}
+            disabled={isTyping}
+            onSend={(text) => onSend(text)}
+          />
+        </div>
+      )}
+
+      <div className={`p-4 bg-white shrink-0 ${chatOptions && !isTyping ? '' : 'border-t border-gray-100'}`}>
         <div className="relative flex items-end">
           <textarea
             ref={inputRef}

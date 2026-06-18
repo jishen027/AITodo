@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Menu, ListTodo, MessageSquare, Loader2 } from 'lucide-react';
+import { Menu, ListTodo, MessageSquare } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import TodoList from '@/components/TodoList';
 import ChatPanel from '@/components/ChatPanel';
@@ -39,7 +39,7 @@ export default function Home() {
     inputMessage,
     setInputMessage,
     isTyping,
-    isUpdatingPlan,
+    isPlanProposed,
     streamingText,
     isLoading,
     newTaskText,
@@ -59,6 +59,12 @@ export default function Home() {
     reorderMyDay,
     updateSelectedTodo,
     handleSendMessage,
+    activeChatOptions,
+    activePendingDelta,
+    applyUpsertItem,
+    applyRemoveItem,
+    applyAllDelta,
+    dismissDelta,
     aiAddedTodoIds,
     clearAiAddedTodoIds,
   } = usePlans();
@@ -162,18 +168,9 @@ export default function Home() {
           <div className="md:hidden flex border-b border-gray-200 bg-white shrink-0">
             <button
               onClick={() => setMobilePlanTab('tasks')}
-              className={`relative flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 border-b-2 transition-colors ${mobilePlanTab === 'tasks' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}`}
+              className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 border-b-2 transition-colors ${mobilePlanTab === 'tasks' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}`}
             >
               <ListTodo className="w-4 h-4" /> Tasks
-              {/* AI is updating the todo list — show a live indicator so users in the Chat tab notice */}
-              {isTyping && (
-                <span className="flex items-center gap-1 text-indigo-500">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  {mobilePlanTab !== 'tasks' && (
-                    <span className="absolute top-1.5 right-1/2 translate-x-6 w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
-                  )}
-                </span>
-              )}
             </button>
             <button
               onClick={() => setMobilePlanTab('chat')}
@@ -228,7 +225,6 @@ export default function Home() {
                 editingTitleId={editingTitleId}
                 editedTitle={editedTitle}
                 aiAddedTodoIds={aiAddedTodoIds}
-                isAiUpdating={isUpdatingPlan}
                 onAnimationDone={clearAiAddedTodoIds}
                 onSelectTodo={setSelectedTodoId}
                 onToggleTodo={toggleTodo}
@@ -263,8 +259,16 @@ export default function Home() {
                   inputMessage={inputMessage}
                   visible={!selectedTodoId}
                   planTitle={activePlan.title}
+                  chatOptions={activeChatOptions}
+                  isPlanProposed={isPlanProposed}
+                  pendingDelta={activePendingDelta}
+                  currentTodos={activeTodos}
                   onInputChange={setInputMessage}
                   onSend={handleSendMessage}
+                  onApplyUpsert={(id) => applyUpsertItem(activePlan.id, id)}
+                  onApplyRemove={(id) => applyRemoveItem(activePlan.id, id)}
+                  onApplyAll={() => applyAllDelta(activePlan.id)}
+                  onDismissDelta={() => dismissDelta(activePlan.id)}
                   onClose={() => setIsChatOpen(false)}
                 />
               </div>

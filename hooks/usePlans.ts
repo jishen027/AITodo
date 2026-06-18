@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
-import { Plan, Todo, TodoWithPlan, MyDaySuggestion } from '@/types';
+import { Plan, Todo, TodoWithPlan, MyDaySuggestion, ChatOptions } from '@/types';
 import { generateId } from '@/lib/utils';
 import {
   callChatStream,
@@ -86,6 +86,11 @@ Output EXACTLY ONE control token on its own final line at the end of EVERY reply
 **Trigger:** User states a vague new goal without enough detail.
 **Action:** Ask 1–3 focused questions (timeline, constraints, outcomes, and — when tasks happen at physical places — where, e.g. which gym, store, or venue). Markdown text only.
 
+**Quick-reply options (optional):** When a Phase 1 question has a clear, finite set of choices, append an OPTIONS block on a new line immediately after \`<<<ASKING>>>\`:
+- Single-choice (only one applies): \`<<<OPTIONS:{"type":"single","options":["Choice A","Choice B"]}>>>\`
+- Multi-choice (several can apply): \`<<<OPTIONS:{"type":"multi","options":["Choice A","Choice B","Choice C"]}>>>\`
+Rules: 2–5 options; labels ≤ 5 words each. An "Other / custom" entry is always surfaced automatically — never add one yourself. Only use OPTIONS when choices are genuinely finite; omit for open-ended questions (e.g. "What is your goal?").
+
 ## Phase 2 → \`<<<PROPOSED>>>\`
 **Trigger:** You have enough context (goal + rough timeline + at least one constraint/priority).
 **Action:** Present the proposed plan as a Markdown table (Task | Priority | Deadline | Time | Location | Brief Steps). Use "—" for empty locations. Ask: "Does this look good?" Adjust and re-propose on tweaks (stay in Phase 2).
@@ -95,7 +100,7 @@ Output EXACTLY ONE control token on its own final line at the end of EVERY reply
 **Trigger B:** ${hasExistingTodos
     ? 'The plan already has tasks AND the user asks for a direct modification — add/remove/reschedule/rename/reprioritise a task. SKIP Phases 1 & 2 and go straight here.'
     : 'User asks for a direct edit to an already-existing plan.'}
-**Action:** Reply with ONE short, friendly sentence stating what you changed (e.g. "Done — moved the train to 8:00 and added the SSD to your shopping run."). The app regenerates the task list automatically.
+**Action:** Reply with ONE short, friendly sentence describing what is being changed — written in present/future tense, NOT past tense (e.g. "Moving the train to 8:00 and adding the SSD to your shopping run." or "Adding a gym session for Tuesday morning."). Do NOT say "Done", "Updated", "Created", or any word that implies the change is already applied — it hasn't been yet; the user will review and confirm it.
 **Do NOT** output the task list, a table, or JSON. **Do NOT** end with a colon or say "here is the plan".
 **You MUST end the reply with the \`<<<CONFIRMED>>>\` token** — it is the ONLY signal that tells the app to apply the change. Forgetting it means the plan silently does not update. Whenever the user asks to add, remove, change, reschedule, rename, or reprioritise a task, you are in Phase 3 — confirm and emit \`<<<CONFIRMED>>>\`.
 `.trim();
@@ -123,7 +128,7 @@ ${incompleteTodos.length > 0 ? JSON.stringify(incompleteTodos, null, 2) : '(no i
 # Rules — INCREMENTAL UPDATES ONLY
 - "upsert" = ONLY the incomplete tasks that are NEW or that CHANGED in this turn. Include each such task in full.
 - "remove" = ids of existing incomplete tasks the user asked to delete. Use [] if none.
-- "planTitle" = include only to rename the plan; otherwise omit it.
+- "planTitle" = set a concise title (≤ 40 chars) that captures the user's goal when the current plan title is "New Plan" or another obvious placeholder. For all other plans, include only when the user explicitly requests a rename — omit otherwise.
 - DO NOT re-send unchanged tasks — leave them out entirely; they are kept automatically. (Building a brand-new plan? Then every task is new, so upsert them all.)
 - NEVER output completed tasks in either array — they are locked.
 - When modifying an existing task, reuse its exact id and include the complete updated object (all fields), not just the changed field. Use a short random id for a brand-new task.
@@ -139,11 +144,45 @@ ${incompleteTodos.length > 0 ? JSON.stringify(incompleteTodos, null, 2) : '(no i
 }
 
 // ---------------------------------------------------------------------------
+// Pending delta — stores the AI-generated plan delta before the user confirms it.
+// ---------------------------------------------------------------------------
+interface StoredDelta {
+  upsert: UpsertTodo[];
+  remove: string[];
+  knownIds: string[]; // todo ids visible to the AI at send time
+}
+
+// ---------------------------------------------------------------------------
 // Conversation reply helpers (Call 1 cleanup). The plan delta (Call 2) and My
 // Day suggestions are now returned as validated JSON by the AI SDK's
 // generateObject, so the old JSON extraction / salvage / parse helpers are gone.
 // ---------------------------------------------------------------------------
 type ControlToken = 'asking' | 'proposed' | 'confirmed' | null;
+
+// Extract an embedded <<<OPTIONS:...>>> block from the AI reply, returning both the
+// cleaned text (token removed) and the parsed options — or null when absent/malformed.
+function parseOptionsBlock(text: string): { text: string; options: ChatOptions | null } {
+  const match = /<<<OPTIONS:([\s\S]*?)>>>/i.exec(text);
+  if (!match) return { text, options: null };
+  let options: ChatOptions | null = null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (
+      parsed &&
+      (parsed.type === 'single' || parsed.type === 'multi') &&
+      Array.isArray(parsed.options)
+    ) {
+      const labels = parsed.options
+        .filter((o: unknown): o is string => typeof o === 'string' && o.trim().length > 0)
+        .slice(0, 5);
+      if (labels.length >= 2) options = { type: parsed.type, options: labels };
+    }
+  } catch {
+    // malformed block — silently drop it
+  }
+  const cleaned = text.replace(/<<<OPTIONS:[\s\S]*?>>>/gi, '').trim();
+  return { text: cleaned, options };
+}
 
 function stripControlToken(text: string): { text: string; token: ControlToken } {
   let token: ControlToken = null;
@@ -339,10 +378,7 @@ export function usePlans() {
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [inputMessage, setInputMessage] = useState('');
   const [typingPlanIds, setTypingPlanIds] = useState<Record<string, boolean>>({});
-  // True only while Call 2 (plan JSON generation) is running for a plan. Editing
-  // the plan's todos is locked during this window; the conversation phase (Call 1)
-  // leaves it false so the user can keep editing while just chatting.
-  const [updatingPlanIds, setUpdatingPlanIds] = useState<Record<string, boolean>>({});
+  const [proposedPlanIds, setProposedPlanIds] = useState<Record<string, boolean>>({});
   const [streamingTexts, setStreamingTexts] = useState<Record<string, string>>({});
   const [newTaskText, setNewTaskText] = useState('');
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
@@ -356,6 +392,8 @@ export function usePlans() {
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
   const suggestionsInFlight = useRef(false);
+  const [activeChatOptions, setActiveChatOptions] = useState<ChatOptions | null>(null);
+  const [pendingDeltas, setPendingDeltas] = useState<Record<string, StoredDelta | null>>({});
 
   // Fetch all plans from the database and merge into state. Used on mount and by
   // pull-to-refresh. Preserves the current active plan when it still exists,
@@ -714,13 +752,16 @@ Return the chosen tasks as { id, reason } entries, where "reason" is max 10 word
     }).catch(console.error);
   };
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !activePlan) return;
+  const handleSendMessage = async (overrideText?: string) => {
+    const userText = (overrideText !== undefined ? overrideText : inputMessage).trim();
+    if (!userText || !activePlan) return;
 
-    const userText = inputMessage.trim();
     const planId = activePlan.id;
     const currentTodos = activePlan.todos;
-    setInputMessage('');
+    if (overrideText === undefined) setInputMessage('');
+    setActiveChatOptions(null);
+    setProposedPlanIds((prev) => ({ ...prev, [planId]: false }));
+    setPendingDeltas((prev) => ({ ...prev, [planId]: null }));
 
     setPlans((prev) =>
       prev.map((p) =>
@@ -745,23 +786,13 @@ Return the chosen tasks as { id, reason } entries, where "reason" is max 10 word
     });
     setStreamingTexts((prev) => ({ ...prev, [planId]: '' }));
 
-    const { text: chatText, token } = stripControlToken(rawReply);
+    const { text: afterControl, token } = stripControlToken(rawReply);
+    const { text: chatText, options: parsedOptions } = parseOptionsBlock(afterControl);
     // Belt-and-suspenders: strip any stray code block / dangling lead-in the chat
     // model emits despite being told not to, so the user only sees clean Markdown.
     const aiText = trimTrailingLeadIn(chatText.replace(/```[\s\S]*?```/g, '').trim()) || 'Got it.';
-
-    // Persist the user message + conversational reply, and show it immediately.
-    setPlans((prev) =>
-      prev.map((p) => (p.id === planId ? { ...p, chat: [...p.chat, { role: 'ai', text: aiText }] } : p))
-    );
-    fetch(`/api/plans/${planId}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([
-        { role: 'user', text: userText },
-        { role: 'ai', text: aiText },
-      ]),
-    }).catch(console.error);
+    // Show option buttons only when the AI is still gathering info (ASKING phase).
+    setActiveChatOptions(token === 'asking' ? parsedOptions : null);
 
     // --- Call 2: generate the plan DELTA as JSON when the conversation hits a commit ---
     // Fire when:
@@ -778,11 +809,19 @@ Return the chosen tasks as { id, reason } entries, where "reason" is max 10 word
         token !== 'proposed' &&
         (!!pendingProposalRef.current[planId] || hasExistingTodos));
     pendingProposalRef.current[planId] = token === 'proposed';
+    setProposedPlanIds((prev) => ({ ...prev, [planId]: token === 'proposed' }));
 
     if (shouldGenerate) {
-      // Lock plan editing while the JSON delta is generated — the UI shows
-      // "AI is updating your plan." so the user can't race the AI's write.
-      setUpdatingPlanIds((prev) => ({ ...prev, [planId]: true }));
+      // Persist the user message immediately (so it survives a page refresh while
+      // Call 2 is in flight) but hold back the AI reply — it should appear at the
+      // same moment the change preview does, not before. The typing indicator stays
+      // active (isTyping stays true) during this window so the UI doesn't go blank.
+      fetch(`/api/plans/${planId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ role: 'user', text: userText }]),
+      }).catch(console.error);
+
       const planInstruction = buildPlanInstruction(activePlan, plans, personalContext);
       const planHistory: ApiMessage[] = [
         ...history,
@@ -790,67 +829,176 @@ Return the chosen tasks as { id, reason } entries, where "reason" is max 10 word
         { role: 'user', content: 'Now produce the plan delta (upsert + remove) following the rules exactly — only the incomplete tasks that are new or changed.' },
       ];
 
-      // The server runs generateObject against planDeltaSchema, so the reply is
-      // already validated, typed JSON — no extraction, salvage, or retry loop
-      // needed (the AI SDK retries transient failures itself). A thrown/422
-      // response means generation genuinely failed.
       let delta: PlanDelta | null = null;
       try {
         delta = await generatePlanDelta(planHistory, planInstruction);
       } catch (e) {
         console.error('[usePlans] plan delta generation failed:', e);
-      } finally {
-        setUpdatingPlanIds((prev) => ({ ...prev, [planId]: false }));
       }
+
+      // Now reveal the AI text and the change preview simultaneously.
+      setPlans((prev) =>
+        prev.map((p) => (p.id === planId ? { ...p, chat: [...p.chat, { role: 'ai', text: aiText }] } : p))
+      );
+      fetch(`/api/plans/${planId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ role: 'ai', text: aiText }]),
+      }).catch(console.error);
 
       if (delta) {
         const aiUpsert = delta.upsert ?? [];
         const aiRemove = delta.remove ?? [];
         const planTitle = delta.planTitle?.trim() || null;
-        const knownIds = new Set(currentTodos.map((t) => t.id));
 
-        // flushSync forces the functional updater to run synchronously so
-        // `committedTodos` is populated before we persist below. Without it the
-        // updater is queued for a later render and `committedTodos` is still null
-        // when persistTodos is reached — the AI update shows in the UI but never
-        // reaches the DB, so it vanishes on refresh.
-        let committedTodos: Todo[] | null = null;
-        // Newly-added tasks, captured inside the updater for the entry animation:
-        // applyTodoDelta mints fresh ids for new tasks, so the AI's terse ids
-        // wouldn't match the rendered ones — derive from the committed todos.
-        let addedIds: string[] = [];
-        flushSync(() =>
-          setPlans((prev) =>
-            prev.map((p) => {
-              if (p.id !== planId) return p;
-              const todos = applyTodoDelta(aiUpsert, aiRemove, p.todos, knownIds);
-              committedTodos = todos;
-              addedIds = todos.filter((t) => !knownIds.has(t.id)).map((t) => t.id);
-              return { ...p, ...(planTitle ? { title: planTitle } : {}), todos };
-            })
-          )
-        );
-
-        if (addedIds.length) setAiAddedTodoIds(addedIds);
-
-        if (committedTodos) persistTodos(planId, committedTodos);
+        // Apply a plan rename immediately — it doesn't need per-task confirmation.
         if (planTitle) {
+          setPlans((prev) =>
+            prev.map((p) => (p.id === planId ? { ...p, title: planTitle } : p))
+          );
           fetch(`/api/plans/${planId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: planTitle }),
           }).catch(console.error);
         }
+
+        // Store the todo-level changes as pending — the user will confirm each one
+        // (or approve all at once) via the PlanDeltaPreview widget in the chat.
+        if (aiUpsert.length > 0 || aiRemove.length > 0) {
+          setPendingDeltas((prev) => ({
+            ...prev,
+            [planId]: {
+              upsert: aiUpsert,
+              remove: aiRemove,
+              knownIds: currentTodos.map((t) => t.id),
+            },
+          }));
+        }
       } else {
-        // Generation failed — tell the user honestly instead of silently no-op'ing.
         appendAiMessage(
           planId,
           "I couldn't generate the updated plan just now. Please ask me again, or rephrase the change."
         );
       }
+    } else {
+      // For ASKING / PROPOSED: show the conversational reply immediately.
+      setPlans((prev) =>
+        prev.map((p) => (p.id === planId ? { ...p, chat: [...p.chat, { role: 'ai', text: aiText }] } : p))
+      );
+      fetch(`/api/plans/${planId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([
+          { role: 'user', text: userText },
+          { role: 'ai', text: aiText },
+        ]),
+      }).catch(console.error);
     }
 
     setTypingPlanIds((prev) => ({ ...prev, [planId]: false }));
+  };
+
+  // --- Pending delta handlers ---
+
+  // Apply a single upsert (add or update) from the pending preview.
+  const applyUpsertItem = (planId: string, upId: string) => {
+    const delta = pendingDeltas[planId];
+    if (!delta) return;
+    const up = delta.upsert.find((u) => u.id === upId);
+    if (!up) return;
+
+    let newTodos: Todo[] | null = null;
+    let newId: string | null = null;
+
+    flushSync(() =>
+      setPlans((prev) =>
+        prev.map((p) => {
+          if (p.id !== planId) return p;
+          const existing = p.todos.find((t) => t.id === upId && !t.completed);
+          const merged = mergeUpsertTodo(up, existing);
+          if (!existing) newId = merged.id;
+          const todos = existing
+            ? p.todos.map((t) => (t.id === upId && !t.completed ? merged : t))
+            : [...p.todos, merged];
+          newTodos = todos;
+          return { ...p, todos };
+        })
+      )
+    );
+
+    if (newTodos) persistTodos(planId, newTodos);
+    if (newId) setAiAddedTodoIds([newId]);
+
+    const newUpsert = delta.upsert.filter((u) => u.id !== upId);
+    setPendingDeltas((prev) => ({
+      ...prev,
+      [planId]:
+        newUpsert.length === 0 && delta.remove.length === 0
+          ? null
+          : { ...delta, upsert: newUpsert },
+    }));
+  };
+
+  // Apply a single remove from the pending preview.
+  const applyRemoveItem = (planId: string, todoId: string) => {
+    const delta = pendingDeltas[planId];
+    if (!delta) return;
+
+    let newTodos: Todo[] | null = null;
+
+    flushSync(() =>
+      setPlans((prev) =>
+        prev.map((p) => {
+          if (p.id !== planId) return p;
+          const todos = p.todos.filter((t) => !(t.id === todoId && !t.completed));
+          newTodos = todos;
+          return { ...p, todos };
+        })
+      )
+    );
+
+    if (newTodos) persistTodos(planId, newTodos);
+
+    const newRemove = delta.remove.filter((id) => id !== todoId);
+    setPendingDeltas((prev) => ({
+      ...prev,
+      [planId]:
+        delta.upsert.length === 0 && newRemove.length === 0
+          ? null
+          : { ...delta, remove: newRemove },
+    }));
+  };
+
+  // Apply every pending change at once.
+  const applyAllDelta = (planId: string) => {
+    const delta = pendingDeltas[planId];
+    if (!delta) return;
+
+    const knownIds = new Set(delta.knownIds);
+    let committedTodos: Todo[] | null = null;
+    let addedIds: string[] = [];
+
+    flushSync(() =>
+      setPlans((prev) =>
+        prev.map((p) => {
+          if (p.id !== planId) return p;
+          const todos = applyTodoDelta(delta.upsert, delta.remove, p.todos, knownIds);
+          committedTodos = todos;
+          addedIds = todos.filter((t) => !knownIds.has(t.id)).map((t) => t.id);
+          return { ...p, todos };
+        })
+      )
+    );
+
+    if (addedIds.length) setAiAddedTodoIds(addedIds);
+    if (committedTodos) persistTodos(planId, committedTodos);
+    setPendingDeltas((prev) => ({ ...prev, [planId]: null }));
+  };
+
+  // Discard the pending delta without applying anything.
+  const dismissDelta = (planId: string) => {
+    setPendingDeltas((prev) => ({ ...prev, [planId]: null }));
   };
 
   return {
@@ -878,7 +1026,7 @@ Return the chosen tasks as { id, reason } entries, where "reason" is max 10 word
     inputMessage,
     setInputMessage,
     isTyping: !!typingPlanIds[activePlan?.id ?? ''],
-    isUpdatingPlan: !!updatingPlanIds[activePlan?.id ?? ''],
+    isPlanProposed: !!proposedPlanIds[activePlan?.id ?? ''],
     streamingText: streamingTexts[activePlan?.id ?? ''] ?? '',
     isLoading,
     newTaskText,
@@ -898,6 +1046,12 @@ Return the chosen tasks as { id, reason } entries, where "reason" is max 10 word
     reorderMyDay,
     updateSelectedTodo,
     handleSendMessage,
+    activeChatOptions,
+    activePendingDelta: pendingDeltas[activePlan?.id ?? ''] ?? null,
+    applyUpsertItem,
+    applyRemoveItem,
+    applyAllDelta,
+    dismissDelta,
     aiAddedTodoIds,
     clearAiAddedTodoIds: () => setAiAddedTodoIds([]),
   };
