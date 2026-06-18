@@ -118,6 +118,12 @@ export function useDragReorder(ids: string[], onReorder: (orderedIds: string[]) 
       e.preventDefault();
       e.stopPropagation();
 
+      // Capture the pointer on the element so mobile browsers don't convert the
+      // touch into a scroll gesture (which would fire pointercancel and kill the
+      // drag). With capture active, subsequent pointer events are dispatched to
+      // `row` rather than window, so we listen there instead of window below.
+      try { row.setPointerCapture(e.pointerId); } catch (_) { /* unsupported */ }
+
       const rect = row.getBoundingClientRect();
       offsetRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
       pointerRef.current = { x: e.clientX, y: e.clientY };
@@ -165,15 +171,15 @@ export function useDragReorder(ids: string[], onReorder: (orderedIds: string[]) 
       };
 
       const up = () => {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        window.removeEventListener('pointercancel', up);
+        row.removeEventListener('pointermove', move);
+        row.removeEventListener('pointerup', up);
+        row.removeEventListener('pointercancel', up);
         finish();
       };
 
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-      window.addEventListener('pointercancel', up);
+      row.addEventListener('pointermove', move);
+      row.addEventListener('pointerup', up);
+      row.addEventListener('pointercancel', up);
     },
     [computeOrder, positionFloat, onReorder]
   );
