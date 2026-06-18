@@ -65,6 +65,10 @@ export const viewport: Viewport = {
   interactiveWidget: 'resizes-content',
 };
 
+const isProduction = process.env.NODE_ENV === 'production';
+const matomoUrl = process.env.NEXT_PUBLIC_MATOMO_URL;
+const matomoSiteId = process.env.NEXT_PUBLIC_MATOMO_SITE_ID ?? '4';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
@@ -75,6 +79,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           data-website-id="4117e5f5-c284-47c0-8644-62241a5371cf"
           strategy="afterInteractive"
         />
+        {isProduction && matomoUrl && (
+          <Script
+            id="matomo"
+            strategy="afterInteractive"
+            dangerouslySetInnerHTML={{
+              __html: `
+var _paq = window._paq = window._paq || [];
+_paq.push(['trackPageView']);
+_paq.push(['enableLinkTracking']);
+(function() {
+  var u="${matomoUrl.endsWith('/') ? matomoUrl : matomoUrl + '/'}";
+  _paq.push(['setTrackerUrl', u+'matomo.php']);
+  _paq.push(['setSiteId', '${matomoSiteId}']);
+  var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+  g.async=true; g.src=u+'matomo.js'; s.parentNode.insertBefore(g,s);
+})();`,
+            }}
+          />
+        )}
       </body>
     </html>
   );
