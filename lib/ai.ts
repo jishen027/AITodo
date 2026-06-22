@@ -6,10 +6,7 @@ import { createDeepSeek } from '@ai-sdk/deepseek';
 const deepseek = createDeepSeek({ apiKey: process.env.DEEPSEEK_API_KEY ?? '' });
 
 export function chatModel() {
-  // structuredOutputs: false tells the SDK that this model doesn't support the
-  // native response_format JSON schema API, so it goes straight to injecting the
-  // schema into the system prompt (compatibility mode) without logging a warning.
-  return deepseek(process.env.DEEPSEEK_MODEL ?? 'deepseek-chat', { structuredOutputs: false });
+  return deepseek(process.env.DEEPSEEK_MODEL ?? 'deepseek-chat');
 }
 
 export function hasApiKey() {
